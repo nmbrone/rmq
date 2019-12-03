@@ -12,10 +12,6 @@ jobs:
         image: rabbitmq
         ports:
           - 5672:5672
-        env:
-          RABBITMQ_DEFAULT_USER: guest
-          RABBITMQ_DEFAULT_PASS: guest
-          RABBITMQ_DEFAULT_VHOST: "/"
     steps:
       - uses: actions/checkout@v1
       - uses: actions/cache@v1
@@ -37,3 +33,6 @@ jobs:
           mix deps.get
       - name: Run Tests
         run: mix test
+        env:
+          RABBITMQ_HOST: rabbitmq
+          RABBITMQ_PORT: ${{ job.services.rabbitmq.ports[5672] }}

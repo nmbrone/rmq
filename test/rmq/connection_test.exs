@@ -1,8 +1,9 @@
 defmodule RMQ.ConnectionTest do
   use ExUnit.Case
+  import TestHelper
 
   setup_all do
-    RMQ.Connection.start_link(reconnect_interval: 100)
+    RMQ.Connection.start_link(uri: rabbit_uri(), reconnect_interval: 100)
     :ok
   end
 
