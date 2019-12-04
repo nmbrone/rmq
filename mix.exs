@@ -21,7 +21,7 @@ defmodule Rmq.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:amqp, "~> 1.3"},
+      {:amqp, "~> 1.4-pre"},
       {:ex_doc, "~> 0.21", only: :dev, runtime: false},
       {:jason, "~> 1.1"},
       {:uuid, "~> 1.1"}

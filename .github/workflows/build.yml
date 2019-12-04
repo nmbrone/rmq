@@ -13,9 +13,9 @@ jobs:
         ports:
           - 5672:5672
         env:
-          RABBITMQ_DEFAULT_USER: guest
-          RABBITMQ_DEFAULT_PASS: guest
-          RABBITMQ_DEFAULT_VHOST: "/"
+          RABBITMQ_USER: guest
+          RABBITMQ_PASS: guest
+          RABBITMQ_VHOST: "/"
     steps:
       - uses: actions/checkout@v1
       - uses: actions/cache@v1

@@ -81,7 +81,7 @@ defmodule RMQ.Connection do
 
   @impl GenServer
   def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-    Logger.info("[RMQ]: Connection lost due to #{inspect(reason)}. Reconnecting...")
+    Logger.error("[RMQ]: Connection lost due to #{inspect(reason)}. Reconnecting...")
     Process.send_after(self(), :connect, state.reconnect_interval)
     {:noreply, %{state | conn: nil}}
   end

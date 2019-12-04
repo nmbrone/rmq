@@ -3,7 +3,7 @@ defmodule RMQ.ConnectionTest do
   import TestHelper
 
   setup_all do
-    RMQ.Connection.start_link(uri: rabbit_uri(), reconnect_interval: 100)
+    {:ok, _pid} = RMQ.Connection.start_link(uri: rabbit_uri(), reconnect_interval: 100)
     :ok
   end
 
