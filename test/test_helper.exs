@@ -1,11 +1,7 @@
-defmodule TestHelper do
-  def rabbit_uri do
-    host = System.get_env("RABBITMQ_HOST", "localhost")
-    port = System.get_env("RABBITMQ_PORT", "5672")
-    user = System.get_env("RABBITMQ_USER", "guest")
-    pass = System.get_env("RABBITMQ_PASSWORD", "guest")
-    "amqp://#{user}:#{pass}@#{host}:#{port}"
-  end
-end
+# Suppress RabbitMQ progress logs
+:logger.add_primary_filter(
+  :ignore_rabbitmq_progress_reports,
+  {&:logger_filters.domain/2, {:stop, :equal, [:progress]}}
+)
 
 ExUnit.start()

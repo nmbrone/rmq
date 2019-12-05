@@ -46,7 +46,7 @@ defmodule RMQ.Connection do
   def init(options) do
     {uri, options} = Keyword.pop(options, :uri, "amqp://localhost")
     {connection_name, options} = Keyword.pop(options, :connection_name, :undefined)
-    {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 10_000)
+    {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 5000)
 
     state = %{
       conn: nil,
@@ -81,8 +81,13 @@ defmodule RMQ.Connection do
 
   @impl GenServer
   def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-    Logger.error("[RMQ]: Connection lost due to #{inspect(reason)}. Reconnecting...")
+    Logger.info("[RMQ]: Connection lost due to #{inspect(reason)}. Reconnecting...")
     Process.send_after(self(), :connect, state.reconnect_interval)
     {:noreply, %{state | conn: nil}}
+  end
+
+  @impl GenServer
+  def terminate(_reason, %{conn: conn}) when not is_nil(conn) do
+    AMQP.Connection.close(conn)
   end
 end

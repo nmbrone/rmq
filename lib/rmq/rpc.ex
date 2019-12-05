@@ -19,7 +19,7 @@ defmodule RMQ.RPC do
       require Logger
       use GenServer
 
-      @default_timeout unquote(Keyword.get(opts, :timeout, 5000))
+      @default_timeout Keyword.get(unquote(opts), :timeout, 5000)
 
       def start_link() do
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)

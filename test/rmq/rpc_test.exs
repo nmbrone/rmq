@@ -1,6 +1,5 @@
 defmodule RMQ.RPCTest do
-  use ExUnit.Case
-  import TestHelper
+  use RMQ.Case
 
   defmodule Worker do
     use RMQ.RPC
@@ -8,7 +7,6 @@ defmodule RMQ.RPCTest do
   end
 
   setup_all do
-    {:ok, _pid} = RMQ.Connection.start_link(uri: rabbit_uri())
     {:ok, _pid} = Worker.start_link()
     {:ok, conn} = RMQ.Connection.get_connection()
     {:ok, chan} = AMQP.Channel.open(conn)
