@@ -4,16 +4,22 @@ defmodule RMQ.Consumer do
 
   ## Options
 
-    * `:queue` - The name of the queue to consume. Will be created if does not exist;
-    * `:exchange` - The name of the exchange to which `queue` should be bound.
+    * `:queue` - the name of the queue to consume. Will be created if does not exist;
+    * `:exchange` - the name of the exchange to which `queue` should be bound.
+      Also accepts two-element tuple `{type, name}`. Defaults to `""`;
+    * `:routing_key` - queue binding key. Defaults to `queue`;
       Will be created if does not exist. Defaults to `""`;
-    * `:dead_letter_queue` - Defaults to `"#{queue}_error"`;
-    * `:dead_letter_exchange` - Defaults to `"#{exchange}.deadletter"`;
-    * `:concurrency` - Defaults to `true`;
-    * `:prefetch_count` - Defaults to `10`;
+    * `:dead_letter` - defines if the consumer should setup deadletter exchange and queue.
+      Defaults to `true`;
+    * `:dead_letter_queue` - the name of dead letter queue. Defaults to `"#{queue}_error"`;
+    * `:dead_letter_exchange` - the name of the exchange to which `dead_letter_queue` should be bound.
+      Also accepts two-element tuple `{type, name}`. Defaults to `"#{exchange}.dead-letter"`;
+    * `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
+    * `:concurrency` - defines if `consume/3` callback will be called in a separate process
+      using `Task.start/1`. Defaults to `true`;
+    * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
     * `:consumer_tag` - Defaults to current module name;
     * `:restart_delay` - Defaults to `5000`;
-    * `:routing_key` - Defaults to `queue`;
 
   ## Example
 
@@ -49,14 +55,16 @@ defmodule RMQ.Consumer do
       @impl GenServer
       def init(_opts) do
         queue = Keyword.fetch!(unquote(config), :queue)
-        exchange = Keyword.get(unquote(config), :exchange, "")
+        {_, exchange} = Keyword.get(unquote(config), :exchange, "") |> normalize_exchange()
 
         config =
           unquote(config)
           |> Enum.into(%{})
           |> Map.put_new(:routing_key, queue)
           |> Map.put_new(:exchange, exchange)
-          |> Map.put_new(:dead_letter_exchange, "#{exchange}.deadletter")
+          |> Map.put_new(:dead_letter, true)
+          |> Map.put_new(:dead_letter_routing_key, queue)
+          |> Map.put_new(:dead_letter_exchange, "#{exchange}.dead-letter")
           |> Map.put_new(:dead_letter_queue, "#{queue}_error")
           |> Map.put_new(:prefetch_count, 10)
           |> Map.put_new(:concurrency, true)
@@ -103,36 +111,8 @@ defmodule RMQ.Consumer do
           {:ok, conn} ->
             {:ok, chan} = AMQP.Channel.open(conn)
             Process.monitor(chan.pid)
-
-            {:ok, _} = AMQP.Queue.declare(chan, config.dead_letter_queue, durable: true)
-
-            {:ok, _} =
-              AMQP.Queue.declare(chan, config.queue,
-                durable: true,
-                arguments: [
-                  {"x-dead-letter-exchange", :longstr, config.dead_letter_exchange},
-                  {"x-dead-letter-routing-key", :longstr, config.dead_letter_queue}
-                ]
-              )
-
-            :ok = AMQP.Exchange.declare(chan, config.dead_letter_exchange, :direct, durable: true)
-            :ok = AMQP.Queue.bind(chan, config.dead_letter_queue, config.dead_letter_exchange)
-
-            # skip declaring default exchange
-            unless config.exchange == "" do
-              :ok = AMQP.Exchange.declare(chan, config.exchange, :direct, durable: true)
-
-              :ok =
-                AMQP.Queue.bind(chan, config.queue, config.exchange,
-                  routing_key: config.routing_key
-                )
-            end
-
-            :ok = AMQP.Basic.qos(chan, prefetch_count: config.prefetch_count)
-
-            {:ok, _} =
-              AMQP.Basic.consume(chan, config.queue, nil, consumer_tag: config.consumer_tag)
-
+            arguments = setup_dead_letter(chan, config)
+            setup_queue(chan, config, arguments)
             Logger.info("[#{__MODULE__}]: Consumer started")
             {:noreply, %{state | chan: chan}}
 
@@ -153,6 +133,39 @@ defmodule RMQ.Consumer do
       def terminate(_reason, %{chan: chan}) do
         unless is_nil(chan), do: AMQP.Channel.close(chan)
       end
+
+      defp setup_queue(chan, config, arguments) do
+        {type, exchange} = normalize_exchange(config.exchange)
+
+        {:ok, %{queue: queue}} =
+          AMQP.Queue.declare(chan, config.queue, durable: true, arguments: arguments)
+
+        # skip declaring default exchange
+        unless exchange == "" do
+          :ok = AMQP.Exchange.declare(chan, exchange, type, durable: true)
+          :ok = AMQP.Queue.bind(chan, queue, exchange, routing_key: config.routing_key)
+        end
+
+        :ok = AMQP.Basic.qos(chan, prefetch_count: config.prefetch_count)
+        {:ok, _} = AMQP.Basic.consume(chan, queue, nil, consumer_tag: config.consumer_tag)
+      end
+
+      defp setup_dead_letter(_chan, %{dead_letter: false}), do: []
+
+      defp setup_dead_letter(chan, %{dead_letter: true} = config) do
+        {type, exchange} = normalize_exchange(config.dead_letter_exchange)
+        {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, config.dead_letter_queue, durable: true)
+        :ok = AMQP.Exchange.declare(chan, exchange, type, durable: true)
+        :ok = AMQP.Queue.bind(chan, queue, exchange)
+
+        [
+          {"x-dead-letter-exchange", :longstr, exchange},
+          {"x-dead-letter-routing-key", :longstr, config.dead_letter_routing_key}
+        ]
+      end
+
+      defp normalize_exchange({type, name}), do: {type, name}
+      defp normalize_exchange(name), do: {:direct, name}
     end
   end
 end
