@@ -68,12 +68,12 @@ defmodule RMQ.Connection do
   def handle_info(:connect, state) do
     case AMQP.Connection.open(state.uri, state.name, state.options) do
       {:ok, conn} ->
-        Logger.info("[RMQ]: Successfully connected to the server")
+        Logger.info("[RMQ] Successfully connected to the server")
         Process.monitor(conn.pid)
         {:noreply, %{state | conn: conn}}
 
       {:error, error} ->
-        Logger.error("[RMQ]: Failed to connect to the server: #{inspect(error)}. Reconnecting...")
+        Logger.error("[RMQ] Failed to connect to the server: #{inspect(error)}. Reconnecting...")
         Process.send_after(self(), :connect, state.reconnect_interval)
         {:noreply, state}
     end
@@ -81,7 +81,7 @@ defmodule RMQ.Connection do
 
   @impl GenServer
   def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-    Logger.warn("[RMQ]: Connection lost due to #{inspect(reason)}. Reconnecting...")
+    Logger.warn("[RMQ] Connection lost due to #{inspect(reason)}. Reconnecting...")
     Process.send_after(self(), :connect, state.reconnect_interval)
     {:noreply, %{state | conn: nil}}
   end

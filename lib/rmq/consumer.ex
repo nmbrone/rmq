@@ -18,7 +18,7 @@ defmodule RMQ.Consumer do
     * `:concurrency` - defines if `consume/3` callback will be called in a separate process
       using `Task.start/1`. Defaults to `true`;
     * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
-    * `:consumer_tag` - Defaults to current module name;
+    * `:consumer_tag` - Defaults to a current module name;
     * `:restart_delay` - Defaults to `5000`;
 
   ## Example
@@ -113,7 +113,7 @@ defmodule RMQ.Consumer do
             Process.monitor(chan.pid)
             arguments = setup_dead_letter(chan, config)
             setup_queue(chan, config, arguments)
-            Logger.info("[#{__MODULE__}]: Consumer started")
+            Logger.info("[#{__MODULE__}] Consumer started")
             {:noreply, %{state | chan: chan}}
 
           {:error, :not_connected} ->
@@ -124,7 +124,7 @@ defmodule RMQ.Consumer do
 
       @impl GenServer
       def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-        Logger.warn("[#{__MODULE__}]: Consumer down due to #{inspect(reason)}. Restarting...")
+        Logger.warn("[#{__MODULE__}] Consumer down due to #{inspect(reason)}. Restarting...")
         Process.send_after(self(), :init, state.config.restart_delay)
         {:noreply, %{state | chan: nil}}
       end
