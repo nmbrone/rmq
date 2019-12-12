@@ -10,7 +10,7 @@ defmodule RMQ.ConsumerTest do
     routing_key: "*.*"
   )
 
-  define_consumer(Consumer4, queue: "rmq_consumer_4", dead_letter: false)
+  define_consumer(Consumer4, queue: "rmq_consumer_4", dead_letter: false, restart_delay: 100)
 
   setup do
     {:ok, conn} = RMQ.Connection.get_connection()
@@ -26,7 +26,7 @@ defmodule RMQ.ConsumerTest do
     message = "Hello, World!"
     message_id = uuid()
     AMQP.Basic.publish(chan, "", queue, message, message_id: message_id)
-    assert_receive {:consumed, ^message, %{message_id: message_id}}
+    assert_receive {:consumed, ^message, %{message_id: ^message_id}}
   end
 
   test "declares the exchange and consumes from it", %{chan: chan} do
@@ -42,7 +42,7 @@ defmodule RMQ.ConsumerTest do
     message_id = uuid()
     AMQP.Basic.publish(chan, exchange, queue, message, message_id: message_id)
     assert exchange_exist?(chan, {:direct, dl_exchange})
-    assert_receive {:consumed, ^message, %{message_id: message_id}}
+    assert_receive {:consumed, ^message, %{message_id: ^message_id}}
   end
 
   test "declares the exchange of type other than :direct via tuple {type, name}", %{chan: chan} do
@@ -53,7 +53,7 @@ defmodule RMQ.ConsumerTest do
     message = "Hello, World!"
     message_id = uuid()
     AMQP.Basic.publish(chan, exchange, "rmq.topic", message, message_id: message_id)
-    assert_receive {:consumed, ^message, %{message_id: message_id}}
+    assert_receive {:consumed, ^message, %{message_id: ^message_id}}
   end
 
   test "dead letter can be opted out", %{chan: chan} do
@@ -62,6 +62,17 @@ defmodule RMQ.ConsumerTest do
     start_supervised!(Consumer4)
     Process.sleep(100)
     refute exchange_exist?(chan, {:direct, exchange})
+  end
+
+  test "automatically restarts", %{conn: conn, chan: chan} do
+    AMQP.Queue.delete(chan, "rmq_consumer_4")
+    start_supervised!(Consumer4)
+    Process.sleep(100)
+    message = "Hello, World!"
+    message_id = uuid()
+    AMQP.Basic.publish(chan, "", "rmq_consumer_4", message, message_id: message_id)
+    AMQP.Connection.close(conn)
+    assert_receive {:consumed, ^message, %{message_id: ^message_id}}, 300
   end
 
   def exchange_exist?(chan, {type, exchange}) do

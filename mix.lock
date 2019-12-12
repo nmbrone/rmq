@@ -1,5 +1,5 @@
 %{
-  "amqp": {:hex, :amqp, "1.4.0-rc.0", "a8eb4e8d60f8c36b3ac9c63be531329ad928173a11a37ac0fea38edc781c5b18", [:mix], [{:amqp_client, "~> 3.8.0", [hex: :amqp_client, repo: "hexpm", optional: false]}], "hexpm"},
+  "amqp": {:hex, :amqp, "1.4.0", "4172595d467b9360850a8eca254c5946af9970684d335d555a9f3410a0e43995", [:mix], [{:amqp_client, "~> 3.8.0", [hex: :amqp_client, repo: "hexpm", optional: false]}], "hexpm"},
   "amqp_client": {:hex, :amqp_client, "3.8.2", "b50ac381c3c016a697d6ab8f08367043a08358cfeb8ee97832ccc7d101e59cef", [:make, :rebar3], [{:rabbit_common, "3.8.2", [hex: :rabbit_common, repo: "hexpm", optional: false]}], "hexpm"},
   "credentials_obfuscation": {:hex, :credentials_obfuscation, "1.1.0", "513793cc20c18afc9e03e584b436192a751a8344890e03a8741c65c8d6866fab", [:rebar3], [], "hexpm"},
   "earmark": {:hex, :earmark, "1.4.3", "364ca2e9710f6bff494117dbbd53880d84bebb692dafc3a78eb50aa3183f2bfd", [:mix], [], "hexpm"},

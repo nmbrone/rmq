@@ -124,7 +124,7 @@ defmodule RMQ.Consumer do
 
       @impl GenServer
       def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-        Logger.error("[#{__MODULE__}]: Consumer down due to #{inspect(reason)}. Restarting...")
+        Logger.warn("[#{__MODULE__}]: Consumer down due to #{inspect(reason)}. Restarting...")
         Process.send_after(self(), :init, state.config.restart_delay)
         {:noreply, %{state | chan: nil}}
       end
