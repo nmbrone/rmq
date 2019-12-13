@@ -2,14 +2,17 @@ defmodule RMQ.RPCTest do
   use RMQ.Case
 
   defmodule Worker do
-    use RMQ.RPC
-    def call(route, payload), do: remote_call(route, payload)
+    use RMQ.RPC, publishing_options: [app_id: "RMQ Test"], restart_delay: 100
+  end
+
+  defmodule Worker2 do
+    use RMQ.RPC, exchange: "rmq"
   end
 
   setup_all do
-    {:ok, _pid} = Worker.start_link()
     {:ok, conn} = RMQ.Connection.get_connection()
     {:ok, chan} = AMQP.Channel.open(conn)
+
     {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
     {:ok, %{queue: slow_queue}} = AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
 
@@ -17,6 +20,7 @@ defmodule RMQ.RPCTest do
       params = Jason.decode!(payload)
       res = Jason.encode!(%{params: params, response: %{ok: true}})
       AMQP.Basic.publish(chan, "", meta.reply_to, res, correlation_id: meta.correlation_id)
+      send(:current_test, {:consumed, params, meta})
     end)
 
     AMQP.Queue.subscribe(chan, slow_queue, fn payload, meta ->
@@ -24,31 +28,62 @@ defmodule RMQ.RPCTest do
       res = Jason.encode!(%{params: params, response: %{ok: true}})
       Process.sleep(200)
       AMQP.Basic.publish(chan, "", meta.reply_to, res, correlation_id: meta.correlation_id)
+      send(:current_test, {:consumed, params, meta})
     end)
 
-    %{chan: chan, queue: queue, slow_queue: slow_queue}
+    start_supervised!(Worker)
+
+    %{conn: conn, chan: chan, queue: queue, slow_queue: slow_queue}
   end
 
-  describe "remote_call/3" do
-    test "performs call", ctx do
-      res = Worker.call(ctx.queue, %{user_id: "USR"})
-      assert res == %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
+  test "performs call", ctx do
+    res = Worker.remote_call(ctx.queue, %{user_id: "USR"})
+    assert res == %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
+  end
+
+  test "handles multiple calls", %{queue: queue, slow_queue: slow_queue} do
+    params = %{user_id: "USR"}
+    response = %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
+    me = self()
+
+    for queue <- [slow_queue, queue] do
+      spawn(fn ->
+        res = Worker.remote_call(queue, params)
+        send(me, {queue, res})
+      end)
     end
 
-    test "handles multiple calls", %{queue: queue, slow_queue: slow_queue} do
-      params = %{user_id: "USR"}
-      response = %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
-      me = self()
+    assert_receive {^queue, ^response}, 300
+    assert_receive {^slow_queue, ^response}, 300
+  end
 
-      for queue <- [slow_queue, queue] do
-        spawn(fn ->
-          res = Worker.call(queue, params)
-          send(me, {queue, res})
-        end)
-      end
+  test "works with non default exchange", %{chan: chan} do
+    exchange = "rmq"
+    queue = "rmq_rpc_1"
+    :ok = AMQP.Exchange.delete(chan, exchange)
+    :ok = AMQP.Exchange.declare(chan, exchange, :direct)
+    {:ok, _} = AMQP.Queue.delete(chan, queue)
+    {:ok, _} = AMQP.Queue.declare(chan, queue, exclusive: true, auto_delete: true)
+    :ok = AMQP.Queue.bind(chan, queue, exchange, routing_key: queue)
 
-      assert_receive {^queue, ^response}, 300
-      assert_receive {^slow_queue, ^response}, 300
-    end
+    AMQP.Queue.subscribe(chan, queue, fn payload, meta ->
+      params = Jason.decode!(payload)
+      res = Jason.encode!(%{params: params, response: %{ok: true}})
+      AMQP.Basic.publish(chan, meta.exchange, meta.reply_to, res, correlation_id: meta.correlation_id)
+    end)
+
+    start_supervised!(Worker2)
+    assert %{"response" => _} = Worker2.remote_call(queue, %{})
+  end
+
+  test "correctly merges publishing options", %{queue: queue} do
+    params = %{"id" => "123"}
+    timestamp = DateTime.utc_now() |> DateTime.to_unix()
+
+    Worker.remote_call(queue, params)
+    assert_receive {:consumed, ^params, %{app_id: "RMQ Test", timestamp: :undefined}}
+
+    Worker.remote_call(queue, params, [app_id: "RMQ RPC Test", timestamp: timestamp])
+    assert_receive {:consumed, ^params, %{app_id: "RMQ RPC Test", timestamp: ^timestamp}}
   end
 end

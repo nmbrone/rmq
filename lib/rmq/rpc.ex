@@ -2,10 +2,21 @@ defmodule RMQ.RPC do
   @moduledoc """
   RPC via RabbitMQ.
 
+  ## Options
+
+    * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
+      Please make sure the exchange exist. Defaults to `""`.
+    * `:timeout` - default timeout for `remote_call/5` Defaults to `5000`.
+    * `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
+    * `:restart_delay` - Defaults to `5000`;
+    * `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
+      `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
+      and cannot be overridden. Defaults to `[]`;
+
   ## Example
 
       defmodule MyApp.User do
-        use RMQ.RPC, timeout: 5000
+        use RMQ.RPC, exchange: "", timeout: 5000
 
         def find_by_id(id) do
           remote_call("remote_user_finder", user_id: id)
@@ -19,38 +30,46 @@ defmodule RMQ.RPC do
       require Logger
       use GenServer
 
-      @default_timeout Keyword.get(unquote(opts), :timeout, 5000)
+      @config %{
+        exchange: Keyword.get(unquote(opts), :exchange, ""),
+        consumer_tag: Keyword.get(unquote(opts), :consumer_tag, "#{__MODULE__}"),
+        publishing_options: Keyword.get(unquote(opts), :publishing_options, []),
+        restart_delay: Keyword.get(unquote(opts), :restart_delay, 5000),
+        timeout: Keyword.get(unquote(opts), :timeout, 5000)
+      }
 
-      def start_link() do
-        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+      def start_link(opts \\ []) do
+        GenServer.start_link(__MODULE__, opts, name: __MODULE__)
       end
 
-      def remote_call(queue, payload \\ nil, timeout \\ @default_timeout) do
-        GenServer.call(__MODULE__, {:publish, queue, payload}, timeout)
+      def remote_call(queue, payload, options \\ [], timeout \\ @config.timeout) do
+        GenServer.call(__MODULE__, {:publish, queue, payload, options}, timeout)
       end
 
       @impl GenServer
-      def init(:ok) do
+      def init(_opts) do
         send(self(), :init)
         {:ok, %{chan: nil, queue: nil, pids: %{}}}
       end
 
       @impl GenServer
-      def handle_call({:publish, queue, payload}, from, state) do
+      def handle_call({:publish, queue, payload, options}, from, state) do
         correlation_id = UUID.uuid1()
 
+        options =
+          @config.publishing_options
+          |> Keyword.merge(options)
+          |> Keyword.put(:reply_to, state.queue)
+          |> Keyword.put(:correlation_id, correlation_id)
+          |> Keyword.put(:content_type, "application/json")
+
         Logger.debug("""
-        #{__MODULE__} publish
+        #{__MODULE__} is publishing
           Queue: #{inspect(queue)}
           Payload: #{inspect(payload)}
         """)
 
-        AMQP.Basic.publish(state.chan, "", queue, Jason.encode!(payload),
-          reply_to: state.queue,
-          correlation_id: correlation_id,
-          content_type: "application/json"
-        )
-
+        AMQP.Basic.publish(state.chan, @config.exchange, queue, Jason.encode!(payload), options)
         {:noreply, put_in(state.pids[correlation_id], from)}
       end
 
@@ -60,15 +79,12 @@ defmodule RMQ.RPC do
           {:ok, conn} ->
             {:ok, chan} = AMQP.Channel.open(conn)
             Process.monitor(chan.pid)
-
-            {:ok, %{queue: queue}} =
-              AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
-
-            {:ok, _} = AMQP.Basic.consume(chan, queue)
+            queue = setup_callback_queue(chan)
+            Logger.info("[#{__MODULE__}] RPC started")
             {:noreply, %{state | chan: chan, queue: queue}}
 
           {:error, :not_connected} ->
-            Process.send_after(self(), :init, 5000)
+            Process.send_after(self(), :init, @config.restart_delay)
             {:noreply, state}
         end
       end
@@ -99,7 +115,7 @@ defmodule RMQ.RPC do
           payload = Jason.decode!(payload)
 
           Logger.debug("""
-          #{__MODULE__} consume
+          #{__MODULE__} is consuming
             Queue: #{inspect(meta.routing_key)}
             Payload: #{inspect(payload)}
           """)
@@ -113,13 +129,21 @@ defmodule RMQ.RPC do
 
       @impl GenServer
       def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-        Logger.info(
-          "#{__MODULE__} down. The monitored process #{inspect(pid)} " <>
-          "died with reason #{inspect(reason)}. Restarting in 5s..."
-        )
-
-        Process.send_after(self(), :init, 5000)
+        Logger.warn("[#{__MODULE__}] RPC down due to #{inspect(reason)}. Restarting...")
+        Process.send_after(self(), :init, @config.restart_delay)
         {:noreply, state}
+      end
+
+      defp setup_callback_queue(chan) do
+        {:ok, %{queue: queue}} =
+          AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
+
+        unless @config.exchange == "" do
+          :ok = AMQP.Queue.bind(chan, queue, @config.exchange, routing_key: queue)
+        end
+
+        {:ok, _} = AMQP.Basic.consume(chan, queue, nil, consumer_tag: @config.consumer_tag)
+        queue
       end
     end
   end
