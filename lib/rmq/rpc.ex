@@ -6,13 +6,13 @@ defmodule RMQ.RPC do
 
     * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
       Please make sure the exchange exist. Defaults to `""`.
-    * `:timeout` - default timeout for `remote_call/4`. Will be passed directly to the underlying
+    * `:timeout` - default timeout for `c:remote_call/4`. Will be passed directly to the underlying
       call of `GenServer.call/3` Defaults to `5000`.
     * `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
     * `:restart_delay` - Defaults to `5000`;
     * `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
       `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
-      and cannot be overridden. Defaults to `[]`;
+      and cannot be overridden. Defaults to `[]`.
 
   ## Example
 

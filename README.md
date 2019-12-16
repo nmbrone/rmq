@@ -86,7 +86,7 @@ end
 * `:restart_delay` - restart delay. Defaults to `5000`;
 * `:publishing_options` - options for [`AMQP.Basic.publish/5`](https://hexdocs.pm/amqp/1.4.0/AMQP.Basic.html#publish/5) 
   except `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
-  and cannot be overridden. Defaults to `[]`;
+  and cannot be overridden. Defaults to `[]`.
 
 
 ## RMQ.Consumer
@@ -124,4 +124,4 @@ end
   using `Task.start/1`. Defaults to `true`;
 * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
 * `:consumer_tag` - consumer tag. Defaults to a current module name;
-* `:restart_delay` - restart delay. Defaults to `5000`;
+* `:restart_delay` - restart delay. Defaults to `5000`.
