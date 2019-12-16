@@ -70,6 +70,10 @@ defmodule MyApp.RemoteResource do
   def find_by_id(id) do
     remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
   end
+
+  def list_all() do
+    remote_call("remote-resource-list-all", %{})
+  end
 end
 ```
 
@@ -83,3 +87,41 @@ end
 * `:publishing_options` - options for [`AMQP.Basic.publish/5`](https://hexdocs.pm/amqp/1.4.0/AMQP.Basic.html#publish/5) 
   except `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
   and cannot be overridden. Defaults to `[]`;
+
+
+## RMQ.Consumer
+
+RabbitMQ Consumer.
+
+#### Usage
+
+```elixir
+defmodule MyApp.Consumer do
+  use RMQ.Consumer, queue: "my-app-consumer-queue"
+
+  @impl RMQ.Consumer
+  def consume(chan, message, meta) do
+    # handle message here
+    ack(chan, meta.delivery_tag)
+  end
+end
+```
+
+#### Options
+
+* `:queue` - the name of the queue to consume. Will be created if does not exist;
+* `:exchange` - the name of the exchange to which `queue` should be bound.
+  Also accepts two-element tuple `{type, name}`. Defaults to `""`;
+* `:routing_key` - queue binding key. Defaults to `queue`;
+  Will be created if does not exist. Defaults to `""`;
+* `:dead_letter` - defines if the consumer should setup deadletter exchange and queue.
+  Defaults to `true`;
+* `:dead_letter_queue` - the name of dead letter queue. Defaults to `"#{queue}_error"`;
+* `:dead_letter_exchange` - the name of the exchange to which `dead_letter_queue` should be bound.
+  Also accepts two-element tuple `{type, name}`. Defaults to `"#{exchange}.dead-letter"`;
+* `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
+* `:concurrency` - defines if `consume/3` callback will be called in a separate process
+  using `Task.start/1`. Defaults to `true`;
+* `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
+* `:consumer_tag` - consumer tag. Defaults to a current module name;
+* `:restart_delay` - restart delay. Defaults to `5000`;

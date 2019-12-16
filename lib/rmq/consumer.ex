@@ -18,8 +18,8 @@ defmodule RMQ.Consumer do
     * `:concurrency` - defines if `consume/3` callback will be called in a separate process
       using `Task.start/1`. Defaults to `true`;
     * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
-    * `:consumer_tag` - Defaults to a current module name;
-    * `:restart_delay` - Defaults to `5000`;
+    * `:consumer_tag` - consumer tag. Defaults to a current module name;
+    * `:restart_delay` - restart delay. Defaults to `5000`;
 
   ## Example
 
