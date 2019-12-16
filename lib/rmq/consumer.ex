@@ -24,21 +24,24 @@ defmodule RMQ.Consumer do
   ## Example
 
       defmodule MyApp.Consumer do
-        use RMQ.Consumer, queue: "my_app_consumer_queue"
+        use RMQ.Consumer, queue: "my-app-consumer-queue"
 
         @impl RMQ.Consumer
-        def consume(conn, message, meta) do
+        def consume(chan, message, meta) do
           # handle message here
+          ack(chan, meta.delivery_tag)
         end
       end
 
   """
 
-  @type chan :: AMQP.Channel.t()
-  @type payload :: any()
-  @type meta :: Map.t()
-
-  @callback consume(chan, payload, meta) :: any()
+  @doc """
+  Callback for consuming the message.
+  Keep in mind that the message needs to be explicitly acknowledged via `AMQP.Basic.ack/3`
+  or rejected via `AMQP.Basic.reject/3`. For convenience, these functions
+  are imported and are available directly.
+  """
+  @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: Map.t()) :: any()
 
   defmacro __using__(config) when is_list(config) do
     quote location: :keep do

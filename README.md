@@ -54,7 +54,7 @@ end
 * `:uri` - AMQP URI (defaults to `"amqp://localhost"`);
 * `:connection_name` - RabbitMQ connection name (defaults to `:undefined`);
 * `:reconnect_interval` - Reconnect interval (defaults to `5000`);
-* any other option for [`AMQP.Connection.open/2`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/2-options).
+* options for [`AMQP.Connection.open/3`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/3).
 
 
 ## RMQ.RPC
@@ -65,10 +65,21 @@ RPC via RabbitMQ.
 
 ```elixir
 defmodule MyApp.RemoteResource do
-  use RMQ.RPC, timeout: 5000
+  use RMQ.RPC, publishing_options: [app_id: "MyApp"]
     
   def find_by_id(id) do
-    remote_call("remote_resource_finder", id: id)
+    remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
   end
 end
 ```
+
+#### Options
+
+* `:exchange` - the name of the exchange to which RPC consuming queue is bound.
+  Please make sure the exchange exist. Defaults to `""`.
+* `:timeout` - default timeout for `remote_call/4` Defaults to `5000`.
+* `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
+* `:restart_delay` - restart delay. Defaults to `5000`;
+* `:publishing_options` - options for [`AMQP.Basic.publish/5`](https://hexdocs.pm/amqp/1.4.0/AMQP.Basic.html#publish/5) 
+  except `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
+  and cannot be overridden. Defaults to `[]`;

@@ -6,7 +6,8 @@ defmodule RMQ.RPC do
 
     * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
       Please make sure the exchange exist. Defaults to `""`.
-    * `:timeout` - default timeout for `remote_call/5` Defaults to `5000`.
+    * `:timeout` - default timeout for `remote_call/4`. Will be passed directly to the underlying
+      call of `GenServer.call/3` Defaults to `5000`.
     * `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
     * `:restart_delay` - Defaults to `5000`;
     * `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
@@ -15,20 +16,42 @@ defmodule RMQ.RPC do
 
   ## Example
 
-      defmodule MyApp.User do
-        use RMQ.RPC, exchange: "", timeout: 5000
+      defmodule MyApp.RemoteResource do
+        use RMQ.RPC, publishing_options: [app_id: "MyApp"]
 
         def find_by_id(id) do
-          remote_call("remote_user_finder", user_id: id)
+          remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
+        end
+
+        def list_all() do
+          remote_call("remote-resource-list-all", %{})
         end
       end
 
   """
 
+  @doc """
+  Performs remote procedure call.
+
+  The callback is already implemented. You just need to use it.
+  `options` and `timeout` can be omitted.
+
+   - `options` - same as `publishing_options` but have precedence over them. Defaults to `[]`.
+   - `timeout` - defaults to `5000`.
+  """
+  @callback remote_call(
+              queue :: String.t(),
+              payload :: any(),
+              options :: Keyword.t(),
+              timeout()
+            ) :: any()
+
   defmacro __using__(opts \\ []) do
     quote location: :keep do
       require Logger
       use GenServer
+
+      @behaviour RMQ.RPC
 
       @config %{
         exchange: Keyword.get(unquote(opts), :exchange, ""),
@@ -42,6 +65,7 @@ defmodule RMQ.RPC do
         GenServer.start_link(__MODULE__, opts, name: __MODULE__)
       end
 
+      @impl RMQ.RPC
       def remote_call(queue, payload, options \\ [], timeout \\ @config.timeout) do
         GenServer.call(__MODULE__, {:publish, queue, payload, options}, timeout)
       end
@@ -135,8 +159,7 @@ defmodule RMQ.RPC do
       end
 
       defp setup_callback_queue(chan) do
-        {:ok, %{queue: queue}} =
-          AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
+        {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
 
         unless @config.exchange == "" do
           :ok = AMQP.Queue.bind(chan, queue, @config.exchange, routing_key: queue)

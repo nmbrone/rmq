@@ -8,7 +8,8 @@ defmodule RMQ.Connection do
 
     * `:uri` - AMQP URI (defaults to `"amqp://localhost"`);
     * `:connection_name` - RabbitMQ connection name (defaults to `:undefined`);
-    * `:reconnect_interval` - Reconnect interval (defaults to `5000`).
+    * `:reconnect_interval` - Reconnect interval (defaults to `5000`);
+    * options for `AMQP.Connection.open/3`.
 
   See `AMQP.Connection.open/2` for other options.
 
