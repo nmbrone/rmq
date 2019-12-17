@@ -41,20 +41,25 @@ defmodule RMQ.RPCTest do
     assert res == %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
   end
 
-  test "handles multiple calls", %{queue: queue, slow_queue: slow_queue} do
+  test "handles multiple calls from different processes", %{queue: queue, slow_queue: slow_queue} do
     params = %{user_id: "USR"}
     response = %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
     me = self()
 
-    for queue <- [slow_queue, queue] do
+    for q <- [slow_queue, queue] do
       spawn(fn ->
-        res = Worker.remote_call(queue, params)
-        send(me, {queue, res})
+        res = Worker.remote_call(q, params)
+        send(me, {q, res})
       end)
     end
 
     assert_receive {^queue, ^response}, 300
     assert_receive {^slow_queue, ^response}, 300
+  end
+
+  test "handles multiple calls from the same process", %{queue: queue, slow_queue: slow_queue} do
+    assert %{"params" => %{"req" => 1}} = Worker.remote_call(slow_queue, %{req: 1})
+    assert %{"params" => %{"req" => 2}} = Worker.remote_call(queue, %{req: 2})
   end
 
   test "works with non default exchange", %{chan: chan} do
@@ -69,7 +74,10 @@ defmodule RMQ.RPCTest do
     AMQP.Queue.subscribe(chan, queue, fn payload, meta ->
       params = Jason.decode!(payload)
       res = Jason.encode!(%{params: params, response: %{ok: true}})
-      AMQP.Basic.publish(chan, meta.exchange, meta.reply_to, res, correlation_id: meta.correlation_id)
+
+      AMQP.Basic.publish(chan, meta.exchange, meta.reply_to, res,
+        correlation_id: meta.correlation_id
+      )
     end)
 
     start_supervised!(Worker2)
@@ -83,7 +91,7 @@ defmodule RMQ.RPCTest do
     Worker.remote_call(queue, params)
     assert_receive {:consumed, ^params, %{app_id: "RMQ Test", timestamp: :undefined}}
 
-    Worker.remote_call(queue, params, [app_id: "RMQ RPC Test", timestamp: timestamp])
+    Worker.remote_call(queue, params, app_id: "RMQ RPC Test", timestamp: timestamp)
     assert_receive {:consumed, ^params, %{app_id: "RMQ RPC Test", timestamp: ^timestamp}}
   end
 end
