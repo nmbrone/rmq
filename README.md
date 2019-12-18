@@ -34,12 +34,21 @@ RMQ.Connection.start_link(options)
 In most applications it should be started under the application's supervision tree as follows:
 
 ```elixir
+config :rmq, :connection,
+  uri: "amqp://quest:quest@localhost:5672",
+  connection_name: "RMQ.Connection",
+  reconnect_interval: 5000
+  # ...
+```
+
+```elixir
 defmodule MyApp.Application do
   use Application
 
   def start(_type, _args) do
     children = [
-      {RMQ.Connection, [uri: "amqp://localhost", connection_name: "MyApp"]},
+      RMQ.Connection
+      # ...
     ]
 
     opts = [strategy: :one_for_one, name: MyApp.Supervisor]
@@ -56,6 +65,7 @@ end
 * `:reconnect_interval` - Reconnect interval (defaults to `5000`);
 * options for [`AMQP.Connection.open/3`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/3).
 
+Options passed to `start_link/1` will be merged into options from the config.
 
 ## RMQ.RPC
 

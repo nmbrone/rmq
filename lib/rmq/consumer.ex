@@ -101,7 +101,7 @@ defmodule RMQ.Consumer do
       @impl GenServer
       def handle_info({:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
         if config.concurrency do
-          Task.start(fn -> consume(chan, payload, meta) end)
+          spawn(fn -> consume(chan, payload, meta) end)
         else
           consume(chan, payload, meta)
         end

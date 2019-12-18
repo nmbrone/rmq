@@ -1,4 +1,4 @@
-defmodule Rmq.MixProject do
+defmodule RMQ.MixProject do
   use Mix.Project
 
   def project do
@@ -7,8 +7,22 @@ defmodule Rmq.MixProject do
       version: "0.1.0",
       elixir: "~> 1.9",
       elixirc_paths: elixirc_paths(Mix.env()),
+      build_embedded: Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      name: "RMQ",
+      description: "RMQ - a set of tools for convenient work with RabbitMQ",
+      source_url: "https://github.com/nmbrone/rmq",
+      homepage_url: "https://github.com/nmbrone/rmq",
+      package: [
+        maintainers: ["Sergey Snozyk"],
+        licenses: ["MIT"],
+        links: %{"GitHub" => "https://github.com/nmbrone/rmq"}
+      ],
+      docs: [
+        main: "RMQ",
+        extras: ["README.md"]
+      ]
     ]
   end
 
