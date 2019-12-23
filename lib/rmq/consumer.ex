@@ -4,6 +4,7 @@ defmodule RMQ.Consumer do
 
   ## Options
 
+    * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:queue` - the name of the queue to consume. Will be created if does not exist;
     * `:exchange` - the name of the exchange to which `queue` should be bound.
       Also accepts two-element tuple `{type, name}`. Defaults to `""`;
@@ -24,7 +25,9 @@ defmodule RMQ.Consumer do
   ## Example
 
       defmodule MyApp.Consumer do
-        use RMQ.Consumer, queue: "my-app-consumer-queue"
+        use RMQ.Consumer,
+          connection: MyApp.RabbitConnection,
+          queue: "my-app-consumer-queue"
 
         @impl RMQ.Consumer
         def consume(chan, message, meta) do
@@ -34,6 +37,9 @@ defmodule RMQ.Consumer do
       end
 
   """
+
+  @doc "Starts a `GenServer` process linked to the current process."
+  @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
 
   @doc """
   Callback for consuming the message.
@@ -51,19 +57,21 @@ defmodule RMQ.Consumer do
       import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2]
 
       @behaviour RMQ.Consumer
+      @connection Keyword.fetch!(unquote(config), :connection)
 
       def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+        GenServer.start_link(__MODULE__, nil, Keyword.put_new(opts, :name, __MODULE__))
       end
 
       @impl GenServer
-      def init(_opts) do
+      def init(_) do
         queue = Keyword.fetch!(unquote(config), :queue)
         {_, exchange} = Keyword.get(unquote(config), :exchange, "") |> normalize_exchange()
 
         config =
           unquote(config)
           |> Enum.into(%{})
+          |> Map.drop([:connection])
           |> Map.put_new(:routing_key, queue)
           |> Map.put_new(:exchange, exchange)
           |> Map.put_new(:dead_letter, true)
@@ -72,7 +80,7 @@ defmodule RMQ.Consumer do
           |> Map.put_new(:dead_letter_queue, "#{queue}_error")
           |> Map.put_new(:prefetch_count, 10)
           |> Map.put_new(:concurrency, true)
-          |> Map.put_new(:consumer_tag, Atom.to_string(__MODULE__))
+          |> Map.put_new(:consumer_tag, to_string(__MODULE__))
           |> Map.put_new(:restart_delay, 5000)
 
         Process.flag(:trap_exit, true)
@@ -111,7 +119,7 @@ defmodule RMQ.Consumer do
 
       @impl GenServer
       def handle_info(:init, %{config: config} = state) do
-        case RMQ.Connection.get_connection() do
+        case @connection.get_connection() do
           {:ok, conn} ->
             {:ok, chan} = AMQP.Channel.open(conn)
             Process.monitor(chan.pid)

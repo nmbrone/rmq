@@ -2,15 +2,20 @@ defmodule RMQ.RPCTest do
   use RMQ.Case
 
   defmodule Worker do
-    use RMQ.RPC, publishing_options: [app_id: "RMQ Test"], restart_delay: 100
+    use RMQ.RPC,
+      connection: RMQ.TestConnection,
+      publishing_options: [app_id: "RMQ Test"],
+      restart_delay: 100
   end
 
   defmodule Worker2 do
-    use RMQ.RPC, exchange: "rmq"
+    use RMQ.RPC,
+      connection: RMQ.TestConnection,
+      exchange: "rmq"
   end
 
   setup_all do
-    {:ok, conn} = RMQ.Connection.get_connection()
+    {:ok, conn} = RMQ.TestConnection.get_connection()
     {:ok, chan} = AMQP.Channel.open(conn)
 
     {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)

@@ -4,6 +4,7 @@ defmodule RMQ.RPC do
 
   ## Options
 
+    * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
       Please make sure the exchange exist. Defaults to `""`.
     * `:timeout` - default timeout for `c:remote_call/4`. Will be passed directly to the underlying
@@ -17,7 +18,9 @@ defmodule RMQ.RPC do
   ## Example
 
       defmodule MyApp.RemoteResource do
-        use RMQ.RPC, publishing_options: [app_id: "MyApp"]
+        use RMQ.RPC,
+          connection: MyApp.RabbitConnection,
+          publishing_options: [app_id: "MyApp"]
 
         def find_by_id(id) do
           remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
@@ -30,11 +33,11 @@ defmodule RMQ.RPC do
 
   """
 
+  @doc "Starts a `GenServer` process linked to the current process."
+  @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
+
   @doc """
   Performs remote procedure call.
-
-  The callback is already implemented. You just need to use it.
-  `options` and `timeout` can be omitted.
 
    - `options` - same as `publishing_options` but have precedence over them. Defaults to `[]`.
    - `timeout` - defaults to `5000`.
@@ -52,17 +55,19 @@ defmodule RMQ.RPC do
       use GenServer
 
       @behaviour RMQ.RPC
+      @connection Keyword.fetch!(unquote(opts), :connection)
 
       @config %{
         exchange: Keyword.get(unquote(opts), :exchange, ""),
-        consumer_tag: Keyword.get(unquote(opts), :consumer_tag, "#{__MODULE__}"),
+        consumer_tag: Keyword.get(unquote(opts), :consumer_tag, to_string(__MODULE__)),
         publishing_options: Keyword.get(unquote(opts), :publishing_options, []),
         restart_delay: Keyword.get(unquote(opts), :restart_delay, 5000),
         timeout: Keyword.get(unquote(opts), :timeout, 5000)
       }
 
+      @impl RMQ.RPC
       def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+        GenServer.start_link(__MODULE__, nil, Keyword.put_new(opts, :name, __MODULE__))
       end
 
       @impl RMQ.RPC
@@ -71,7 +76,7 @@ defmodule RMQ.RPC do
       end
 
       @impl GenServer
-      def init(_opts) do
+      def init(_) do
         send(self(), :init)
         {:ok, %{chan: nil, queue: nil, pids: %{}}}
       end
@@ -99,7 +104,7 @@ defmodule RMQ.RPC do
 
       @impl GenServer
       def handle_info(:init, state) do
-        case RMQ.Connection.get_connection() do
+        case @connection.get_connection() do
           {:ok, conn} ->
             {:ok, chan} = AMQP.Channel.open(conn)
             Process.monitor(chan.pid)

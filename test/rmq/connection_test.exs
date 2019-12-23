@@ -2,31 +2,68 @@ defmodule RMQ.ConnectionTest do
   use ExUnit.Case
   import RMQ.TestHelpers
 
-  test "accepts options via configuration" do
-    Application.put_env(:rmq, :connection, uri: rabbit_uri(), virtual_host: "not_exist")
-    assert {:ok, pid} = RMQ.Connection.start_link()
-    assert {:error, :not_connected} = RMQ.Connection.get_connection()
-    GenServer.stop(pid)
-    Application.delete_env(:rmq, :connection)
+  defmodule Conn1 do
+    use RMQ.Connection, otp_app: :rmq
   end
 
-  test "accepts options via `start_link/1`" do
-    Application.put_env(:rmq, :connection, virtual_host: "not_exist")
-    assert {:ok, pid} = RMQ.Connection.start_link(uri: rabbit_uri(), virtual_host: "/")
-    assert {:ok, _conn} = RMQ.Connection.get_connection()
+  defmodule Conn2 do
+    use RMQ.Connection, otp_app: :rmq
+
+    def config do
+      [
+        uri: System.get_env("TEST_RABBIT_URI")
+      ]
+    end
+  end
+
+  defmodule Conn3 do
+    use RMQ.Connection,
+      otp_app: :rmq,
+      uri: rabbit_uri(),
+      reconnect_interval: 100
+  end
+
+  test "supports configuration via the application environment" do
+    uri = rabbit_uri()
+
+    Application.put_env(:rmq, Conn1,
+      uri: uri,
+      reconnect_interval: 100,
+      connection_name: "TEST",
+      virtual_host: "/"
+    )
+
+    {:ok, pid} = Conn1.start_link()
+
+    assert %{
+             uri: ^uri,
+             reconnect_interval: 100,
+             name: "TEST",
+             options: [virtual_host: "/"]
+           } = :sys.get_state(pid)
+
     GenServer.stop(pid)
-    Application.delete_env(:rmq, :connection)
+    Application.delete_env(:rmq, Conn1)
+  end
+
+  test "supports runtime configuration via `config` callback" do
+    uri = rabbit_uri()
+    System.put_env("TEST_RABBIT_URI", uri)
+    {:ok, pid} = Conn2.start_link()
+    assert %{uri: ^uri} = :sys.get_state(pid)
+    System.delete_env("TEST_RABBIT_URI")
+    GenServer.stop(pid)
   end
 
   test "reconnects in case of losing connection" do
-    {:ok, pid} = RMQ.Connection.start_link(uri: rabbit_uri(), reconnect_interval: 100)
-    {:ok, conn} = RMQ.Connection.get_connection()
+    {:ok, pid} = Conn3.start_link()
+    {:ok, conn} = Conn3.get_connection()
     # Process.exit(conn.pid, "Good night!")
     AMQP.Connection.close(conn)
     Process.sleep(50)
-    assert {:error, :not_connected} = RMQ.Connection.get_connection()
+    assert {:error, :not_connected} = Conn3.get_connection()
     Process.sleep(200)
-    assert {:ok, %AMQP.Connection{}} = RMQ.Connection.get_connection()
+    assert {:ok, %AMQP.Connection{}} = Conn3.get_connection()
     GenServer.stop(pid)
   end
 end

@@ -11,11 +11,7 @@ defmodule RMQ.Case do
   end
 
   setup_all do
-    start_supervised!(
-      {RMQ.Connection,
-       [uri: TestHelpers.rabbit_uri(), connection_name: "RMQ", reconnect_interval: 100]}
-    )
-
+    start_supervised!(RMQ.TestConnection)
     :ok
   end
 

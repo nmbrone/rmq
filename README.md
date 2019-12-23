@@ -23,23 +23,20 @@ be found at [https://hexdocs.pm/rmq](https://hexdocs.pm/rmq).
 
 ## RMQ.Connection
 
-A GenServer which is responsible for opening and keeping a robust connection to the RabbitMQ broker.
+A `GenServer` which opens and holds a connection to RabbitMQ broker.
 
 #### Usage
 
 ```elixir
-RMQ.Connection.start_link(options)
+defmodule MyApp.RabbitConnection do
+  use RMQ.Connection,
+    otp_app: :my_app,
+    uri: "amqp://localhost",
+    connection_name: to_string(__MODULE__)
+end
 ```
 
-In most applications it should be started under the application's supervision tree as follows:
-
-```elixir
-config :rmq, :connection,
-  uri: "amqp://quest:quest@localhost:5672",
-  connection_name: "RMQ.Connection",
-  reconnect_interval: 5000
-  # ...
-```
+Meant to be started under the application's supervision tree as follows:
 
 ```elixir
 defmodule MyApp.Application do
@@ -47,7 +44,7 @@ defmodule MyApp.Application do
 
   def start(_type, _args) do
     children = [
-      RMQ.Connection
+      MyApp.RabbitConnection
       # ...
     ]
 
@@ -75,8 +72,10 @@ RPC via RabbitMQ.
 
 ```elixir
 defmodule MyApp.RemoteResource do
-  use RMQ.RPC, publishing_options: [app_id: "MyApp"]
-    
+  use RMQ.RPC,
+    connection: MyApp.RabbitConnection,
+    publishing_options: [app_id: "MyApp"]
+
   def find_by_id(id) do
     remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
   end
@@ -89,6 +88,7 @@ end
 
 #### Options
 
+* `:connection` - the connection module which implements `RMQ.Connection` behaviour;
 * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
   Please make sure the exchange exist. Defaults to `""`.
 * `:timeout` - default timeout for `remote_call/4` Defaults to `5000`.
@@ -107,7 +107,9 @@ RabbitMQ Consumer.
 
 ```elixir
 defmodule MyApp.Consumer do
-  use RMQ.Consumer, queue: "my-app-consumer-queue"
+  use RMQ.Consumer,
+    connection: MyApp.RabbitConnection,
+    queue: "my-app-consumer-queue"
 
   @impl RMQ.Consumer
   def consume(chan, message, meta) do
@@ -119,6 +121,7 @@ end
 
 #### Options
 
+* `:connection` - the connection module which implements `RMQ.Connection` behaviour;
 * `:queue` - the name of the queue to consume. Will be created if does not exist;
 * `:exchange` - the name of the exchange to which `queue` should be bound.
   Also accepts two-element tuple `{type, name}`. Defaults to `""`;

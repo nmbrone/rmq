@@ -1,19 +1,30 @@
 defmodule RMQ.ConsumerTest do
   use RMQ.Case
 
-  define_consumer(Consumer1, queue: "rmq_consumer_1")
-  define_consumer(Consumer2, queue: "rmq_consumer_2", exchange: "rmq")
+  define_consumer(Consumer1, connection: RMQ.TestConnection, queue: "rmq_consumer_1")
+
+  define_consumer(Consumer2,
+    connection: RMQ.TestConnection,
+    queue: "rmq_consumer_2",
+    exchange: "rmq"
+  )
 
   define_consumer(Consumer3,
+    connection: RMQ.TestConnection,
     queue: "rmq_consumer_3",
     exchange: {:topic, "rmq_topic"},
     routing_key: "*.*"
   )
 
-  define_consumer(Consumer4, queue: "rmq_consumer_4", dead_letter: false, restart_delay: 100)
+  define_consumer(Consumer4,
+    connection: RMQ.TestConnection,
+    queue: "rmq_consumer_4",
+    dead_letter: false,
+    restart_delay: 100
+  )
 
   setup do
-    {:ok, conn} = RMQ.Connection.get_connection()
+    {:ok, conn} = RMQ.TestConnection.get_connection()
     {:ok, chan} = AMQP.Channel.open(conn)
     {:ok, conn: conn, chan: chan}
   end
