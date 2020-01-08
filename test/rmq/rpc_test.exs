@@ -42,7 +42,7 @@ defmodule RMQ.RPCTest do
   end
 
   test "performs call", ctx do
-    res = Worker.remote_call(ctx.queue, %{user_id: "USR"})
+    res = Worker.call(ctx.queue, %{user_id: "USR"})
     assert res == %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
   end
 
@@ -53,7 +53,7 @@ defmodule RMQ.RPCTest do
 
     for q <- [slow_queue, queue] do
       spawn(fn ->
-        res = Worker.remote_call(q, params)
+        res = Worker.call(q, params)
         send(me, {q, res})
       end)
     end
@@ -63,8 +63,8 @@ defmodule RMQ.RPCTest do
   end
 
   test "handles multiple calls from same process", %{queue: queue, slow_queue: slow_queue} do
-    assert %{"params" => %{"req" => 1}} = Worker.remote_call(slow_queue, %{req: 1})
-    assert %{"params" => %{"req" => 2}} = Worker.remote_call(queue, %{req: 2})
+    assert %{"params" => %{"req" => 1}} = Worker.call(slow_queue, %{req: 1})
+    assert %{"params" => %{"req" => 2}} = Worker.call(queue, %{req: 2})
   end
 
   test "works with non default exchange", %{chan: chan} do
@@ -86,17 +86,17 @@ defmodule RMQ.RPCTest do
     end)
 
     start_supervised!(Worker2)
-    assert %{"response" => _} = Worker2.remote_call(queue, %{})
+    assert %{"response" => _} = Worker2.call(queue, %{})
   end
 
   test "correctly merges publishing options", %{queue: queue} do
     params = %{"id" => "123"}
     timestamp = DateTime.utc_now() |> DateTime.to_unix()
 
-    Worker.remote_call(queue, params)
+    Worker.call(queue, params)
     assert_receive {:consumed, ^params, %{app_id: "RMQ Test", timestamp: :undefined}}
 
-    Worker.remote_call(queue, params, app_id: "RMQ RPC Test", timestamp: timestamp)
+    Worker.call(queue, params, app_id: "RMQ RPC Test", timestamp: timestamp)
     assert_receive {:consumed, ^params, %{app_id: "RMQ RPC Test", timestamp: ^timestamp}}
   end
 end

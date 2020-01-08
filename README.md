@@ -74,11 +74,11 @@ defmodule MyApp.RemoteResource do
     publishing_options: [app_id: "MyApp"]
 
   def find_by_id(id) do
-    remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
+    call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
   end
 
   def list_all() do
-    remote_call("remote-resource-list-all", %{})
+    call("remote-resource-list-all", %{})
   end
 end
 ```
@@ -88,7 +88,7 @@ end
 * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
 * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
   Please make sure the exchange exist. Defaults to `""`.
-* `:timeout` - default timeout for `remote_call/4` Defaults to `5000`.
+* `:timeout` - default timeout for `call/4` Defaults to `5000`.
 * `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
 * `:restart_delay` - restart delay. Defaults to `5000`;
 * `:publishing_options` - options for [`AMQP.Basic.publish/5`](https://hexdocs.pm/amqp/1.4.0/AMQP.Basic.html#publish/5) 

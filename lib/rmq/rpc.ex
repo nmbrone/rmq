@@ -5,7 +5,7 @@ defmodule RMQ.RPC do
   In short, it's a `GenServer` which Implements a publisher and a consumer in one place.
 
   A module which will implement this behaviour will be able to publish messages
-  via `c:remote_call/4` and wait for a response.
+  via `c:call/4` and wait for a response.
 
   You can read more about how this works
   in the [tutorial](https://www.rabbitmq.com/tutorials/tutorial-six-python.html).
@@ -15,7 +15,7 @@ defmodule RMQ.RPC do
     * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
       Please make sure the exchange exist. Defaults to `""`.
-    * `:timeout` - default timeout for `c:remote_call/4`. Will be passed directly to the underlying
+    * `:timeout` - default timeout for `c:call/4`. Will be passed directly to the underlying
       call of `GenServer.call/3` Defaults to `5000`.
     * `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
     * `:restart_delay` - Defaults to `5000`;
@@ -57,7 +57,7 @@ defmodule RMQ.RPC do
           publishing_options: [app_id: "MyApp"]
 
         def find_by_id(id) do
-          remote_call("remote-resource-finder", %{id: id})
+          call("remote-resource-finder", %{id: id})
         end
       end
 
@@ -72,7 +72,7 @@ defmodule RMQ.RPC do
    - `options` - same as `publishing_options` but have precedence over them. Can be omitted.
    - `timeout` - same as timeout in configuration. Can be omitted.
   """
-  @callback remote_call(
+  @callback call(
               queue :: String.t(),
               payload :: any(),
               options :: Keyword.t(),
@@ -101,7 +101,7 @@ defmodule RMQ.RPC do
       end
 
       @impl RMQ.RPC
-      def remote_call(queue, payload, options \\ [], timeout \\ @config.timeout) do
+      def call(queue, payload, options \\ [], timeout \\ @config.timeout) do
         GenServer.call(__MODULE__, {:publish, queue, payload, options}, timeout)
       end
 
