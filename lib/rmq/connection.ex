@@ -1,6 +1,6 @@
 defmodule RMQ.Connection do
   @moduledoc ~S"""
-  A `GenServer` which opens and holds a connection to RabbitMQ broker.
+  A `GenServer` which provides a robust connection to RabbitMQ broker.
 
   Could be used as following:
 
@@ -30,7 +30,7 @@ defmodule RMQ.Connection do
         end
       end
 
-  ## Config
+  ## Configuration
 
     * `:otp_app` - the only required value. It should point to an OTP application
       that has the connection configuration.
@@ -48,7 +48,7 @@ defmodule RMQ.Connection do
   @callback get_connection() :: {:ok, AMQP.Connection.t()} | {:error, :not_connected}
 
   @doc """
-  A callback for dynamic configuration.
+  Callback for dynamic configuration.
 
   Can be used in case the connection configuration needs to be set dynamically,
   for example by reading a system environment variable.

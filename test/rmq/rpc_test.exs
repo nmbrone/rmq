@@ -62,7 +62,7 @@ defmodule RMQ.RPCTest do
     assert_receive {^slow_queue, ^response}, 300
   end
 
-  test "handles multiple calls from the same process", %{queue: queue, slow_queue: slow_queue} do
+  test "handles multiple calls from same process", %{queue: queue, slow_queue: slow_queue} do
     assert %{"params" => %{"req" => 1}} = Worker.remote_call(slow_queue, %{req: 1})
     assert %{"params" => %{"req" => 2}} = Worker.remote_call(queue, %{req: 2})
   end

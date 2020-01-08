@@ -60,7 +60,7 @@ defmodule RMQ.Consumer do
   @callback process(payload :: any(), meta :: Map.t()) :: payload :: any()
 
   @doc """
-  Callback for consuming the message.
+  Consumes the message.
   """
   @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: Map.t()) :: any()
 

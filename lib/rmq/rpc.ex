@@ -2,7 +2,15 @@ defmodule RMQ.RPC do
   @moduledoc """
   RPC via RabbitMQ.
 
-  ## Options
+  In short, it's a `GenServer` which Implements a publisher and a consumer in one place.
+
+  A module which will implement this behaviour will be able to publish messages
+  via `c:remote_call/4` and wait for a response.
+
+  You can read more about how this works
+  in the [tutorial](https://www.rabbitmq.com/tutorials/tutorial-six-python.html).
+
+  ## Configuration
 
     * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
@@ -15,7 +23,33 @@ defmodule RMQ.RPC do
       `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
       and cannot be overridden. Defaults to `[]`.
 
-  ## Example
+  ## Example usage with `RMQ.Consumer`
+
+  Application 1:
+
+      defmodule MyOtherApp.Consumer do
+        use RMQ.Consumer,
+          connection: MyOtherApp.RabbitConnection,
+          queue: "remote-resource-finder"
+
+        @impl RMQ.Consumer
+        def consume(chan, payload, meta) do
+          response =
+            payload
+            |> Jason.decode!()
+            |> Map.fetch!("id")
+            |> MyOtherApp.Resource.get()
+            |> Jason.encode!()
+
+          AMQP.Basic.publish(chan, meta.exchange, meta.reply_to, response,
+            correlation_id: meta.correlation_id
+          )
+
+          AMQP.Basic.ack(chan, meta.delivery_tag)
+        end
+      end
+
+  Application 2:
 
       defmodule MyApp.RemoteResource do
         use RMQ.RPC,
@@ -23,11 +57,7 @@ defmodule RMQ.RPC do
           publishing_options: [app_id: "MyApp"]
 
         def find_by_id(id) do
-          remote_call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
-        end
-
-        def list_all() do
-          remote_call("remote-resource-list-all", %{})
+          remote_call("remote-resource-finder", %{id: id})
         end
       end
 
@@ -39,8 +69,8 @@ defmodule RMQ.RPC do
   @doc """
   Performs remote procedure call.
 
-   - `options` - same as `publishing_options` but have precedence over them. Defaults to `[]`.
-   - `timeout` - defaults to `5000`.
+   - `options` - same as `publishing_options` but have precedence over them. Can be omitted.
+   - `timeout` - same as timeout in configuration. Can be omitted.
   """
   @callback remote_call(
               queue :: String.t(),
@@ -161,6 +191,12 @@ defmodule RMQ.RPC do
         Logger.warn("[#{__MODULE__}] RPC down due to #{inspect(reason)}. Restarting...")
         Process.send_after(self(), :init, @config.restart_delay)
         {:noreply, state}
+      end
+
+      @impl GenServer
+      def terminate(_reason, %{chan: chan}) do
+        unless is_nil(chan), do: AMQP.Channel.close(chan)
+        :ok
       end
 
       defp setup_callback_queue(chan) do

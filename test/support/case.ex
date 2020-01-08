@@ -1,6 +1,5 @@
 defmodule RMQ.Case do
   use ExUnit.CaseTemplate
-  alias RMQ.TestHelpers
 
   using do
     quote do

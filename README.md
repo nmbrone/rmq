@@ -1,25 +1,22 @@
-# RMQ
+# RMQ - RabbitMQ tools.
+
+[![Actions Status](https://github.com/nmbrone/rmq/workflows/build/badge.svg?branch=master)](https://github.com/nmbrone/rmq/actions)
+[![Hex version badge](https://img.shields.io/hexpm/v/rmq.svg)](https://hex.pm/packages/rmq)
 
 A set of handy tools for working with RabbitMQ in Elixir projects.
 Based on [`amqp`](https://github.com/pma/amqp) elixir client.
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `rmq` to your list of dependencies in `mix.exs`:
+The package can be installed by adding `rmq` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:rmq, "~> 0.1.0"}
+    {:rmq, "~> 0.1.0-beta.0"}
   ]
 end
 ```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/rmq](https://hexdocs.pm/rmq).
-
 
 ## RMQ.Connection
 
@@ -112,7 +109,11 @@ defmodule MyApp.Consumer do
     queue: "my-app-consumer-queue"
 
   @impl RMQ.Consumer
-  def consume(chan, message, meta) do
+  def process(message, %{content_type: "application/json"}), do: Jason.decode!(message)
+  def process(message, _meta), do: message
+  
+  @impl RMQ.Consumer
+  def consume(chan, payload, meta) do
     # handle message here
     ack(chan, meta.delivery_tag)
   end

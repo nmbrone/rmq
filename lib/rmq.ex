@@ -6,8 +6,8 @@ defmodule RMQ do
 
   Includes:
 
-    * `RMQ.Connection`
-    * `RMQ.Consumer`
-    * `RMQ.RPC`
+    * `RMQ.Connection` - a behaviour for implementing managing of RabbitMQ connection.
+    * `RMQ.Consumer` - a behaviour for implementing RabbitMQ consumer.
+    * `RMQ.RPC` - a behaviour for implementing RPC via RabbitMQ.
   """
 end
