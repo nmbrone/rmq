@@ -2,7 +2,14 @@ defmodule RMQ.Consumer do
   @moduledoc ~S"""
   RabbitMQ Consumer.
 
-  ## Options
+  Keep in mind that the consumed message needs to be explicitly acknowledged via `AMQP.Basic.ack/3`
+  or rejected via `AMQP.Basic.reject/3`. For convenience, these functions
+  are imported and are available directly.
+
+  `AMQP.Basic.publish/3` is imported as well which is convenient for the case
+  when the consumer implements RPC.
+
+  ## Configuration
 
     * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:queue` - the name of the queue to consume. Will be created if does not exist;
@@ -16,8 +23,8 @@ defmodule RMQ.Consumer do
     * `:dead_letter_exchange` - the name of the exchange to which `dead_letter_queue` should be bound.
       Also accepts two-element tuple `{type, name}`. Defaults to `"#{exchange}.dead-letter"`;
     * `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
-    * `:concurrency` - defines if `c:consume/3` callback will be called in a separate process
-      using `Task.start/1`. Defaults to `true`;
+    * `:concurrency` - defines if `c:consume/3` callback will be called in a separate process.
+      Defaults to `true`;
     * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
     * `:consumer_tag` - consumer tag. Defaults to a current module name;
     * `:restart_delay` - restart delay. Defaults to `5000`.
@@ -30,7 +37,11 @@ defmodule RMQ.Consumer do
           queue: "my-app-consumer-queue"
 
         @impl RMQ.Consumer
-        def consume(chan, message, meta) do
+        def process(message, %{content_type: "application/json"}), do: Jason.decode!(message)
+        def process(message, _meta), do: message
+
+        @impl RMQ.Consumer
+        def consume(chan, payload, meta) do
           # handle message here
           ack(chan, meta.delivery_tag)
         end
@@ -42,11 +53,14 @@ defmodule RMQ.Consumer do
   @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
 
   @doc """
-  Callback for consuming the message.
+  Optional callback for processing the message before consuming it.
 
-  Keep in mind that the message needs to be explicitly acknowledged via `AMQP.Basic.ack/3`
-  or rejected via `AMQP.Basic.reject/3`. For convenience, these functions
-  are imported and are available directly.
+  Accepts payload and metadata. Must return (modified) payload.
+  """
+  @callback process(payload :: any(), meta :: Map.t()) :: payload :: any()
+
+  @doc """
+  Callback for consuming the message.
   """
   @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: Map.t()) :: any()
 
@@ -54,17 +68,21 @@ defmodule RMQ.Consumer do
     quote location: :keep do
       use GenServer
       require Logger
-      import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2]
+      import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2, publish: 5, publish: 4]
 
       @behaviour RMQ.Consumer
       @connection Keyword.fetch!(unquote(config), :connection)
 
+      @impl RMQ.Consumer
       def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, nil, Keyword.put_new(opts, :name, __MODULE__))
+        GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
       end
 
+      @impl RMQ.Consumer
+      def process(payload, _meta), do: payload
+
       @impl GenServer
-      def init(_) do
+      def init(:ok) do
         queue = Keyword.fetch!(unquote(config), :queue)
         {_, exchange} = Keyword.get(unquote(config), :exchange, "") |> normalize_exchange()
 
@@ -109,9 +127,9 @@ defmodule RMQ.Consumer do
       @impl GenServer
       def handle_info({:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
         if config.concurrency do
-          spawn(fn -> consume(chan, payload, meta) end)
+          spawn(fn -> consume(chan, process(payload, meta), meta) end)
         else
-          consume(chan, payload, meta)
+          consume(chan, process(payload, meta), meta)
         end
 
         {:noreply, state}
@@ -144,6 +162,7 @@ defmodule RMQ.Consumer do
       @impl GenServer
       def terminate(_reason, %{chan: chan}) do
         unless is_nil(chan), do: AMQP.Channel.close(chan)
+        :ok
       end
 
       defp setup_queue(chan, config, arguments) do
@@ -178,6 +197,8 @@ defmodule RMQ.Consumer do
 
       defp normalize_exchange({type, name}), do: {type, name}
       defp normalize_exchange(name), do: {:direct, name}
+
+      defoverridable process: 2
     end
   end
 end

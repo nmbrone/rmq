@@ -19,6 +19,10 @@ defmodule RMQ.TestHelpers do
         use RMQ.Consumer, unquote(config)
 
         @impl RMQ.Consumer
+        def process(message, %{content_type: "application/json"}), do: Jason.decode!(message)
+        def process(message, _meta), do: message
+
+        @impl RMQ.Consumer
         def consume(chan, message, meta) do
           send(:current_test, {:consumed, message, meta})
           ack(chan, meta.delivery_tag)

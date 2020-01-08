@@ -1,7 +1,10 @@
 defmodule RMQ.ConsumerTest do
   use RMQ.Case
 
-  define_consumer(Consumer1, connection: RMQ.TestConnection, queue: "rmq_consumer_1")
+  define_consumer(Consumer1,
+    connection: RMQ.TestConnection,
+    queue: "rmq_consumer_1"
+  )
 
   define_consumer(Consumer2,
     connection: RMQ.TestConnection,
@@ -84,6 +87,19 @@ defmodule RMQ.ConsumerTest do
     AMQP.Basic.publish(chan, "", "rmq_consumer_4", message, message_id: message_id)
     AMQP.Connection.close(conn)
     assert_receive {:consumed, ^message, %{message_id: ^message_id}}, 300
+  end
+
+  test "processes the message before consuming it", %{chan: chan} do
+    queue = "rmq_consumer_1"
+    AMQP.Queue.delete(chan, queue)
+    start_supervised!(Consumer1)
+    Process.sleep(100)
+
+    AMQP.Basic.publish(chan, "", queue, Jason.encode!(%{id: 123}),
+      content_type: "application/json"
+    )
+
+    assert_receive {:consumed, %{"id" => 123}, %{}}
   end
 
   def exchange_exist?(chan, {type, exchange}) do
