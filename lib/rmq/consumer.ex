@@ -64,6 +64,8 @@ defmodule RMQ.Consumer do
   """
   @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: Map.t()) :: any()
 
+  @optional_callbacks process: 2
+
   defmacro __using__(config) when is_list(config) do
     quote location: :keep do
       use GenServer

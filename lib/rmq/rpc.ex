@@ -101,7 +101,7 @@ defmodule RMQ.RPC do
       end
 
       @impl RMQ.RPC
-      def call(queue, payload, options \\ [], timeout \\ @config.timeout) do
+      def call(queue, payload, options \\ [], timeout \\ @config.timeout) when is_list(options) do
         GenServer.call(__MODULE__, {:publish, queue, payload, options}, timeout)
       end
 
