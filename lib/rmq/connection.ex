@@ -2,7 +2,7 @@ defmodule RMQ.Connection do
   @moduledoc ~S"""
   A `GenServer` which provides a robust connection to RabbitMQ broker.
 
-  Could be used as following:
+  Can be used as following:
 
       defmodule MyApp.RabbitConnection do
         use RMQ.Connection,
@@ -11,7 +11,7 @@ defmodule RMQ.Connection do
           connection_name: to_string(__MODULE__)
       end
 
-  Could be configured via the application environment:
+  Can be configured via the application environment:
 
       config :my_app, MyApp.RabbitConnection,
         uri: "amqp://localhost",
@@ -55,19 +55,23 @@ defmodule RMQ.Connection do
   """
   @callback config() :: Keyword.t()
 
-  defmacro __using__(config) do
-    quote location: :keep do
+  @optional_callbacks config: 0
+
+  defmacro __using__(opts) do
+    quote location: :keep, bind_quoted: [opts: opts] do
       require Logger
       use GenServer
 
       @behaviour RMQ.Connection
 
-      @opt_app Keyword.fetch!(unquote(config), :otp_app)
-      @config Keyword.drop(unquote(config), [:otp_app])
+      {otp_app, conf} = Keyword.pop(opts, :otp_app)
+
+      @otp_app otp_app
+      @config conf
 
       @impl RMQ.Connection
       def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, nil, Keyword.put_new(opts, :name, __MODULE__))
+        GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
       end
 
       @impl RMQ.Connection
@@ -83,21 +87,8 @@ defmodule RMQ.Connection do
 
       @impl GenServer
       def init(_) do
-        options = merge_config()
-        {uri, options} = Keyword.pop(options, :uri, "amqp://localhost")
-        {connection_name, options} = Keyword.pop(options, :connection_name, :undefined)
-        {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 5000)
-
-        state = %{
-          conn: nil,
-          uri: uri,
-          name: connection_name,
-          options: options,
-          reconnect_interval: reconnect_interval
-        }
-
         send(self(), :connect)
-        {:ok, state}
+        {:ok, nil}
       end
 
       @impl GenServer
@@ -106,7 +97,19 @@ defmodule RMQ.Connection do
       end
 
       @impl GenServer
-      def handle_info(:connect, state) do
+      def handle_info(:connect, _) do
+        {uri, rest} = Keyword.pop(get_config(), :uri, "amqp://localhost")
+        {connection_name, rest} = Keyword.pop(rest, :connection_name, :undefined)
+        {reconnect_interval, rest} = Keyword.pop(rest, :reconnect_interval, 5000)
+
+        state = %{
+          conn: nil,
+          uri: uri,
+          name: connection_name,
+          options: rest,
+          reconnect_interval: reconnect_interval
+        }
+
         case AMQP.Connection.open(state.uri, state.name, state.options) do
           {:ok, conn} ->
             Logger.info("[RMQ] Successfully connected to the server")
@@ -136,8 +139,8 @@ defmodule RMQ.Connection do
         :ok
       end
 
-      defp merge_config do
-        Application.get_env(@opt_app, __MODULE__, [])
+      defp get_config do
+        Application.get_env(@otp_app, __MODULE__, [])
         |> Keyword.merge(@config)
         |> Keyword.merge(config())
       end
