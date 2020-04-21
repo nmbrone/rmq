@@ -4,7 +4,7 @@ defmodule RMQ.MixProject do
   def project do
     [
       app: :rmq,
-      version: "0.1.0-beta.1",
+      version: "0.1.0",
       elixir: "~> 1.8",
       elixirc_paths: elixirc_paths(Mix.env()),
       build_embedded: Mix.env() == :prod,
@@ -29,7 +29,7 @@ defmodule RMQ.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:lager, :logger]
     ]
   end
 

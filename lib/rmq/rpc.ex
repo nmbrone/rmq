@@ -80,19 +80,19 @@ defmodule RMQ.RPC do
             ) :: any()
 
   defmacro __using__(opts \\ []) do
-    quote location: :keep do
+    quote location: :keep, bind_quoted: [opts: opts] do
       require Logger
       use GenServer
 
       @behaviour RMQ.RPC
-      @connection Keyword.fetch!(unquote(opts), :connection)
+      @connection Keyword.get(opts, :connection, RMQ.Connection)
 
       @config %{
-        exchange: Keyword.get(unquote(opts), :exchange, ""),
-        consumer_tag: Keyword.get(unquote(opts), :consumer_tag, to_string(__MODULE__)),
-        publishing_options: Keyword.get(unquote(opts), :publishing_options, []),
-        restart_delay: Keyword.get(unquote(opts), :restart_delay, 5000),
-        timeout: Keyword.get(unquote(opts), :timeout, 5000)
+        exchange: Keyword.get(opts, :exchange, ""),
+        consumer_tag: Keyword.get(opts, :consumer_tag, to_string(__MODULE__)),
+        publishing_options: Keyword.get(opts, :publishing_options, []),
+        restart_delay: Keyword.get(opts, :restart_delay, 5000),
+        timeout: Keyword.get(opts, :timeout, 5000)
       }
 
       @impl RMQ.RPC
@@ -123,7 +123,7 @@ defmodule RMQ.RPC do
           |> Keyword.put(:content_type, "application/json")
 
         Logger.debug("""
-        #{__MODULE__} is publishing
+        [#{__MODULE__}] publishing
           Queue: #{inspect(queue)}
           Payload: #{inspect(payload)}
         """)
@@ -174,7 +174,7 @@ defmodule RMQ.RPC do
           payload = Jason.decode!(payload)
 
           Logger.debug("""
-          #{__MODULE__} is consuming
+          [#{__MODULE__}] consuming
             Queue: #{inspect(meta.routing_key)}
             Payload: #{inspect(payload)}
           """)

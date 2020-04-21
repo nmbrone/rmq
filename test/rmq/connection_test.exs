@@ -1,69 +1,99 @@
 defmodule RMQ.ConnectionTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
+
   import RMQ.TestHelpers
 
-  defmodule Conn1 do
-    use RMQ.Connection, otp_app: :rmq
+  defmodule MyConn do
+    use RMQ.Connection, otp_app: :my_app
   end
 
-  defmodule Conn2 do
-    use RMQ.Connection, otp_app: :rmq
+  @moduletag :capture_log
 
-    def config do
-      [
-        uri: System.get_env("TEST_RABBIT_URI")
-      ]
+  setup tags do
+    unless tags[:skip_config] do
+      Application.put_env(:rmq, :connection,
+        uri: rabbit_uri(),
+        connection_name: "TestConnection",
+        reconnect_interval: 1000,
+        virtual_host: "/"
+      )
+
+      Application.put_env(:my_app, MyConn,
+        uri: rabbit_uri(),
+        connection_name: "TestConnection_2",
+        reconnect_interval: 1000,
+        virtual_host: "/"
+      )
     end
+
+    :ok
   end
 
-  defmodule Conn3 do
-    use RMQ.Connection,
-      otp_app: :rmq,
+  test "can be used directly" do
+    {:ok, pid} = start_supervised(RMQ.Connection)
+    assert %{conn: %AMQP.Connection{}, attempt: 1} = :sys.get_state(pid)
+  end
+
+  test "can be used via `use` macro" do
+    {:ok, pid} = start_supervised(MyConn)
+    assert %{conn: %AMQP.Connection{}, attempt: 1} = :sys.get_state(pid)
+  end
+
+  test "can be used simultaneously" do
+    start_supervised!(RMQ.Connection)
+    start_supervised!(MyConn)
+
+    {:ok, %{pid: pid1}} = RMQ.Connection.get()
+    {:ok, %{pid: pid2}} = MyConn.get()
+
+    assert pid1 !== pid2
+  end
+
+  @tag :skip_config
+  test "reconnects with the given interval" do
+    Application.put_env(:rmq, :connection,
       uri: rabbit_uri(),
-      reconnect_interval: 100
-  end
-
-  test "supports configuration via the application environment" do
-    uri = rabbit_uri()
-
-    Application.put_env(:rmq, Conn1,
-      uri: uri,
-      reconnect_interval: 100,
-      connection_name: "TEST",
-      virtual_host: "/"
+      reconnect_interval: fn _attempt -> 100 end,
+      username: "unknown"
     )
 
-    {:ok, pid} = Conn1.start_link()
+    Application.put_env(:my_app, MyConn,
+      uri: rabbit_uri(),
+      reconnect_interval: 100,
+      username: "unknown"
+    )
 
-    assert %{
-             uri: ^uri,
-             reconnect_interval: 100,
-             name: "TEST",
-             options: [virtual_host: "/"]
-           } = :sys.get_state(pid)
+    start_supervised!(RMQ.Connection)
+    start_supervised!(MyConn)
 
-    GenServer.stop(pid)
-    Application.delete_env(:rmq, Conn1)
+    assert {:error, :not_connected} = RMQ.Connection.get()
+    assert {:error, :not_connected} = MyConn.get()
+
+    Application.put_env(:rmq, :connection, uri: rabbit_uri())
+    Application.put_env(:my_app, MyConn, uri: rabbit_uri())
+
+    Process.sleep(100)
+
+    assert {:ok, _} = RMQ.Connection.get()
+    assert {:ok, _} = MyConn.get()
   end
 
-  test "supports runtime configuration via `config` callback" do
-    uri = rabbit_uri()
-    System.put_env("TEST_RABBIT_URI", uri)
-    {:ok, pid} = Conn2.start_link()
-    assert %{uri: ^uri} = :sys.get_state(pid)
-    System.delete_env("TEST_RABBIT_URI")
-    GenServer.stop(pid)
-  end
+  test "reconnects in case of losing the connection" do
+    start_supervised!(RMQ.Connection)
+    start_supervised!(MyConn)
 
-  test "reconnects in case of losing connection" do
-    {:ok, pid} = Conn3.start_link()
-    {:ok, conn} = Conn3.get_connection()
-    # Process.exit(conn.pid, "Good night!")
-    AMQP.Connection.close(conn)
-    Process.sleep(50)
-    assert {:error, :not_connected} = Conn3.get_connection()
-    Process.sleep(200)
-    assert {:ok, %AMQP.Connection{}} = Conn3.get_connection()
-    GenServer.stop(pid)
+    {:ok, %{pid: pid11} = conn1} = RMQ.Connection.get()
+    {:ok, %{pid: pid12} = conn2} = MyConn.get()
+
+    AMQP.Connection.close(conn1)
+    AMQP.Connection.close(conn2)
+
+    Process.sleep(10)
+
+    {:ok, %{pid: pid21}} = RMQ.Connection.get()
+    {:ok, %{pid: pid22}} = MyConn.get()
+
+    assert pid11 != pid21
+    assert pid12 != pid22
   end
 end

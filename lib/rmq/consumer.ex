@@ -66,14 +66,14 @@ defmodule RMQ.Consumer do
 
   @optional_callbacks process: 2
 
-  defmacro __using__(config) when is_list(config) do
-    quote location: :keep do
+  defmacro __using__(opts) when is_list(opts) do
+    quote location: :keep, bind_quoted: [opts: opts] do
       use GenServer
       require Logger
       import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2, publish: 5, publish: 4]
 
       @behaviour RMQ.Consumer
-      @connection Keyword.fetch!(unquote(config), :connection)
+      @connection Keyword.get(opts, :connection, RMQ.Connection)
 
       @impl RMQ.Consumer
       def start_link(opts \\ []) do
@@ -85,11 +85,11 @@ defmodule RMQ.Consumer do
 
       @impl GenServer
       def init(:ok) do
-        queue = Keyword.fetch!(unquote(config), :queue)
-        {_, exchange} = Keyword.get(unquote(config), :exchange, "") |> normalize_exchange()
+        queue = Keyword.fetch!(unquote(opts), :queue)
+        {_, exchange} = Keyword.get(unquote(opts), :exchange, "") |> normalize_exchange()
 
         config =
-          unquote(config)
+          unquote(opts)
           |> Enum.into(%{})
           |> Map.drop([:connection])
           |> Map.put_new(:routing_key, queue)

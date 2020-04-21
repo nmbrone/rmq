@@ -1,12 +1,11 @@
 defmodule RMQ.TestConnection do
-  use RMQ.Connection,
-    otp_app: :rmq,
-    connection_name: to_string(__MODULE__),
-    reconnect_interval: 100
+  use RMQ.Connection, otp_app: :rmq
 
   def config do
-    [
-      uri: RMQ.TestHelpers.rabbit_uri()
-    ]
+    Keyword.merge(super(),
+      uri: RMQ.TestHelpers.rabbit_uri(),
+      connection_name: to_string(__MODULE__),
+      reconnect_interval: 100
+    )
   end
 end
