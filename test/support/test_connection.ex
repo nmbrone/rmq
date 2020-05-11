@@ -1,5 +1,5 @@
 defmodule RMQ.TestConnection do
-  use RMQ.Connection, otp_app: :rmq
+  use RMQ.Connection
 
   def config do
     Keyword.merge(super(),

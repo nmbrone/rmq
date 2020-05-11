@@ -1,9 +1,12 @@
 defmodule RMQ.ConsumerTest do
   use RMQ.Case
 
+  @moduletag :capture_log
+
   define_consumer(Consumer1,
     connection: RMQ.TestConnection,
-    queue: "rmq_consumer_1"
+    queue: "rmq_consumer_1",
+    reconnect_interval: 200
   )
 
   define_consumer(Consumer2,
@@ -19,42 +22,48 @@ defmodule RMQ.ConsumerTest do
     routing_key: "*.*"
   )
 
-  define_consumer(Consumer4,
-    connection: RMQ.TestConnection,
-    queue: "rmq_consumer_4",
-    dead_letter: false,
-    restart_delay: 100
+  define_consumer(
+    Consumer4,
+    [
+      connection: RMQ.TestConnection,
+      queue: "rmq_consumer_4",
+      dead_letter: false,
+      reconnect_interval: 200
+    ],
+    true
   )
 
   setup do
     {:ok, conn} = RMQ.TestConnection.get_connection()
     {:ok, chan} = AMQP.Channel.open(conn)
+
+    for i <- 1..4 do
+      AMQP.Queue.delete(chan, "rmq_consumer_#{i}")
+      AMQP.Queue.delete(chan, "rmq_consumer_#{i}_error")
+    end
+
     {:ok, conn: conn, chan: chan}
   end
 
-  test "consumes from default exchange", %{chan: chan} do
-    queue = "rmq_consumer_1"
-    AMQP.Queue.delete(chan, queue)
+  test "consumes from the default exchange", %{chan: chan} do
     start_supervised!(Consumer1)
     Process.sleep(100)
     message = "Hello, World!"
     message_id = uuid()
-    AMQP.Basic.publish(chan, "", queue, message, message_id: message_id)
+    AMQP.Basic.publish(chan, "", "rmq_consumer_1", message, message_id: message_id)
     assert_receive {:consumed, ^message, %{message_id: ^message_id}}
   end
 
   test "declares the exchange and consumes from it", %{chan: chan} do
     exchange = "rmq"
     dl_exchange = "rmq.dead-letter"
-    queue = "rmq_consumer_2"
     AMQP.Exchange.delete(chan, exchange)
     AMQP.Exchange.delete(chan, dl_exchange)
-    AMQP.Queue.delete(chan, queue)
     start_supervised!(Consumer2)
     Process.sleep(100)
     message = "Hello, World!"
     message_id = uuid()
-    AMQP.Basic.publish(chan, exchange, queue, message, message_id: message_id)
+    AMQP.Basic.publish(chan, exchange, "rmq_consumer_2", message, message_id: message_id)
     assert exchange_exist?(chan, {:direct, dl_exchange})
     assert_receive {:consumed, ^message, %{message_id: ^message_id}}
   end
@@ -71,15 +80,14 @@ defmodule RMQ.ConsumerTest do
   end
 
   test "dead letter can be opted out", %{chan: chan} do
-    exchange = ".dead-letter"
-    AMQP.Exchange.delete(chan, exchange)
+    dl_exchange = "dead-letter"
+    AMQP.Exchange.delete(chan, dl_exchange)
     start_supervised!(Consumer4)
     Process.sleep(100)
-    refute exchange_exist?(chan, {:direct, exchange})
+    refute exchange_exist?(chan, {:direct, dl_exchange})
   end
 
   test "automatically restarts", %{conn: conn, chan: chan} do
-    AMQP.Queue.delete(chan, "rmq_consumer_4")
     start_supervised!(Consumer4)
     Process.sleep(100)
     message = "Hello, World!"
@@ -87,19 +95,6 @@ defmodule RMQ.ConsumerTest do
     AMQP.Basic.publish(chan, "", "rmq_consumer_4", message, message_id: message_id)
     AMQP.Connection.close(conn)
     assert_receive {:consumed, ^message, %{message_id: ^message_id}}, 300
-  end
-
-  test "processes the message before consuming it", %{chan: chan} do
-    queue = "rmq_consumer_1"
-    AMQP.Queue.delete(chan, queue)
-    start_supervised!(Consumer1)
-    Process.sleep(100)
-
-    AMQP.Basic.publish(chan, "", queue, Jason.encode!(%{id: 123}),
-      content_type: "application/json"
-    )
-
-    assert_receive {:consumed, %{"id" => 123}, %{}}
   end
 
   def exchange_exist?(chan, {type, exchange}) do

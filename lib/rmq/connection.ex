@@ -2,14 +2,14 @@ defmodule RMQ.Connection do
   @moduledoc ~S"""
   A GenServer which provides a robust connection to the RabbitMQ broker.
 
-  ### Usage
+  ## Usage
 
       iex> RMQ.Connection.start_link([])
       {:ok, #PID<0.310.0>}
       iex> RMQ.Connection.get_connection()
       {:ok, %AMQP.Connection{pid: #PID<0.314.0>}}
 
-  ### Configuration
+  ## Configuration
 
       config :rmq, :connection,
         uri: "amqp://localhost",
@@ -23,12 +23,12 @@ defmodule RMQ.Connection do
 
     * `:uri` - an AMQP URI. Defaults to `"amqp://localhost"`;
     * `:connection_name` - a RabbitMQ connection name. Defaults to `:undefined`;
-    * `:reconnect_interval` - reconnect interval in milliseconds. It can be also a function that
+    * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
       accepts the current connection attempt as a number and returns a new interval.
       Defaults to `5000`;
     * other options for `AMQP.Connection.open/3`.
 
-  ### Dynamic configuration
+  ## Dynamic configuration
 
   In case you need to read the configuration dynamically you can use `c:config/0` callback:
 
@@ -45,7 +45,7 @@ defmodule RMQ.Connection do
         end
       end
 
-  ### Multiple connections
+  ## Multiple connections
 
   If for some reason, you need to hold multiple connections you can use the following approach:
 
@@ -71,8 +71,6 @@ defmodule RMQ.Connection do
 
   use GenServer
   require Logger
-
-  defstruct conn: nil, attempt: 0
 
   @doc "Starts a `GenServer` process linked to the current process."
   @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
@@ -123,8 +121,9 @@ defmodule RMQ.Connection do
 
   @impl GenServer
   def init(_) do
+    Process.flag(:trap_exit, true)
     send(self(), :connect)
-    {:ok, %__MODULE__{}}
+    {:ok, %{conn: nil, attempt: 0}}
   end
 
   @impl GenServer
@@ -137,18 +136,18 @@ defmodule RMQ.Connection do
     handle_info(__MODULE__, msg, state)
   end
 
+  @impl GenServer
+  def terminate(_reason, state) do
+    unless is_nil(state.conn), do: AMQP.Connection.close(state.conn)
+    :ok
+  end
+
   @doc false
   def handle_info(module, :connect, state) do
     {uri, options} = Keyword.pop(module.config(), :uri, "amqp://localhost")
     {name, options} = Keyword.pop(options, :name, :undefined)
     {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 5000)
-
     attempt = state.attempt + 1
-
-    reconnect_after =
-      if is_function(reconnect_interval),
-        do: reconnect_interval.(attempt),
-        else: reconnect_interval
 
     case AMQP.Connection.open(uri, name, options) do
       {:ok, conn} ->
@@ -157,18 +156,20 @@ defmodule RMQ.Connection do
         {:noreply, %{state | attempt: attempt, conn: conn}}
 
       {:error, reason} ->
+        time = RMQ.Utils.reconnect_interval(reconnect_interval, attempt)
+
         Logger.error(
           "[#{module}] Failed to connect to the server. Reason: #{inspect(reason)}. " <>
-            "Reconnecting in #{reconnect_after}ms"
+            "Reconnecting in #{time}ms"
         )
 
-        Process.send_after(self(), :connect, reconnect_after)
+        Process.send_after(self(), :connect, time)
         {:noreply, %{state | attempt: attempt}}
     end
   end
 
   def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
-    Logger.error("[#{module}] Connection lost. Reason: #{inspect(reason)}. Reconnecting...")
+    Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
     send(self(), :connect)
     {:noreply, %{state | conn: nil}}
   end

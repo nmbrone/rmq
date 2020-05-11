@@ -2,16 +2,10 @@ defmodule RMQ.Consumer do
   @moduledoc ~S"""
   RabbitMQ Consumer.
 
-  Keep in mind that the consumed message needs to be explicitly acknowledged via `AMQP.Basic.ack/3`
-  or rejected via `AMQP.Basic.reject/3`. For convenience, these functions
-  are imported and are available directly.
-
-  `AMQP.Basic.publish/3` is imported as well which is convenient for the case
-  when the consumer implements RPC.
-
   ## Configuration
 
-    * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
+    * `:connection` - the connection module which implements `RMQ.Connection` behaviour.
+      Defaults to `RMQ.Connection`;
     * `:queue` - the name of the queue to consume. Will be created if does not exist;
     * `:exchange` - the name of the exchange to which `queue` should be bound.
       Also accepts two-element tuple `{type, name}`. Defaults to `""`;
@@ -27,85 +21,199 @@ defmodule RMQ.Consumer do
       Defaults to `true`;
     * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
     * `:consumer_tag` - consumer tag. Defaults to a current module name;
-    * `:restart_delay` - restart delay. Defaults to `5000`.
+    * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
+      accepts the current connection attempt as a number and returns a new interval.
+      Defaults to `5000`;
 
-  ## Example
+  ## Examples
 
       defmodule MyApp.Consumer do
         use RMQ.Consumer,
-          connection: MyApp.RabbitConnection,
           queue: "my-app-consumer-queue"
-
-        @impl RMQ.Consumer
-        def process(message, %{content_type: "application/json"}), do: Jason.decode!(message)
-        def process(message, _meta), do: message
+          exchange: {:direct, "my-exchange"}
 
         @impl RMQ.Consumer
         def consume(chan, payload, meta) do
-          # handle message here
+          # do something with the payload
+          ack(chan, meta.delivery_tag)
+        end
+      end
+
+      defmodule MyApp.Consumer2 do
+        use RMQ.Consumer
+
+        @impl RMQ.Consumer
+        def config do
+          [
+            queue: System.fetch_env!("QUEUE_NAME"),
+            reconnect_interval: fn attempt -> attempt * 1000 end,
+          ]
+        end
+
+        @impl RMQ.Consumer
+        def consume(chan, payload, meta) do
+          # do something with the payload
           ack(chan, meta.delivery_tag)
         end
       end
 
   """
 
+  @defaults [
+    connection: RMQ.Connection,
+    exchange: "",
+    dead_letter: true,
+    prefetch_count: 10,
+    reconnect_interval: 5000,
+    concurrency: true
+  ]
+
   @doc "Starts a `GenServer` process linked to the current process."
   @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
 
   @doc """
-  Optional callback for processing the message before consuming it.
+  A callback for consuming a message.
 
-  Accepts payload and metadata. Must return (modified) payload.
+  Keep in mind that the consumed message needs to be explicitly acknowledged via `AMQP.Basic.ack/3`
+  or rejected via `AMQP.Basic.reject/3`. For convenience, these functions
+  are imported and are available directly.
+
+  `AMQP.Basic.publish/5` is imported as well which is convenient for the case
+  when the consumer implements RPC.
+
+  When `:concurrency` is `true` this function will be executed in the spawned process
+  using `Kernel.spawn/1`.
   """
-  @callback process(payload :: any(), meta :: Map.t()) :: payload :: any()
+  @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: map()) :: any()
 
   @doc """
-  Consumes the message.
+  A callback for dynamic configuration.
   """
-  @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: Map.t()) :: any()
+  @callback config() :: keyword() | map()
 
-  @optional_callbacks process: 2
+  @doc """
+  Does all the job on preparing the queue.
 
-  defmacro __using__(opts) when is_list(opts) do
-    quote location: :keep, bind_quoted: [opts: opts] do
+  Please refer to `setup_queue/2` to see the default implementation for this callback.
+
+  Whenever you need full control over configuring the queue you can implement this callback and
+  use `AMQP` library directly.
+  """
+  @callback setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: :ok
+
+  @doc false
+  def normalize_config(config) when is_list(config) do
+    config = Keyword.merge(@defaults, config)
+    queue = Keyword.fetch!(config, :queue)
+    exchange = Keyword.fetch!(config, :exchange) |> normalize_exchange() |> elem(1)
+    dl_exchange = String.replace_prefix("#{exchange}.dead-letter", ".", "")
+
+    config
+    |> Keyword.put_new(:routing_key, queue)
+    |> Keyword.put_new(:dead_letter_routing_key, queue)
+    |> Keyword.put_new(:dead_letter_exchange, dl_exchange)
+    |> Keyword.put_new(:dead_letter_queue, "#{queue}_error")
+  end
+
+  @doc false
+  def normalize_config(module) when is_atom(module) do
+    module.config()
+    |> normalize_config()
+    |> Keyword.put_new(:consumer_tag, to_string(module))
+  end
+
+  @doc """
+  Holds the default implementation for `c:setup_queue/2` callback.
+  """
+  @spec setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: :ok
+  def setup_queue(chan, config) do
+    {type, exchange} = normalize_exchange(config[:exchange])
+
+    {:ok, %{queue: queue}} =
+      AMQP.Queue.declare(chan, config[:queue],
+        durable: true,
+        arguments: setup_dead_letter(chan, config)
+      )
+
+    # the exchange "" is the default exchange and cannot be declared this way
+    unless exchange == "" do
+      :ok = AMQP.Exchange.declare(chan, exchange, type, durable: true)
+      :ok = AMQP.Queue.bind(chan, queue, exchange, routing_key: config[:routing_key])
+    end
+
+    :ok = AMQP.Basic.qos(chan, prefetch_count: config[:prefetch_count])
+    {:ok, _} = AMQP.Basic.consume(chan, queue, nil, consumer_tag: config[:consumer_tag])
+    :ok
+  end
+
+  defp setup_dead_letter(chan, config) do
+    if config[:dead_letter] do
+      {type, exchange} = normalize_exchange(config[:dead_letter_exchange])
+      {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, config[:dead_letter_queue], durable: true)
+      :ok = AMQP.Exchange.declare(chan, exchange, type, durable: true)
+      :ok = AMQP.Queue.bind(chan, queue, exchange)
+
+      [
+        {"x-dead-letter-exchange", :longstr, exchange},
+        {"x-dead-letter-routing-key", :longstr, config[:dead_letter_routing_key]}
+      ]
+    else
+      []
+    end
+  end
+
+  defp normalize_exchange({type, name}), do: {type, name}
+  defp normalize_exchange(name), do: {:direct, name}
+
+  defmacro __using__(opts \\ []) do
+    quote location: :keep do
       use GenServer
       require Logger
       import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2, publish: 5, publish: 4]
 
       @behaviour RMQ.Consumer
-      @connection Keyword.get(opts, :connection, RMQ.Connection)
+      @config unquote(opts)
 
       @impl RMQ.Consumer
       def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
+        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
       end
 
       @impl RMQ.Consumer
-      def process(payload, _meta), do: payload
+      def setup_queue(chan, config), do: RMQ.Consumer.setup_queue(chan, config)
+
+      @impl RMQ.Consumer
+      def config, do: @config
 
       @impl GenServer
-      def init(:ok) do
-        queue = Keyword.fetch!(unquote(opts), :queue)
-        {_, exchange} = Keyword.get(unquote(opts), :exchange, "") |> normalize_exchange()
-
-        config =
-          unquote(opts)
-          |> Enum.into(%{})
-          |> Map.drop([:connection])
-          |> Map.put_new(:routing_key, queue)
-          |> Map.put_new(:exchange, exchange)
-          |> Map.put_new(:dead_letter, true)
-          |> Map.put_new(:dead_letter_routing_key, queue)
-          |> Map.put_new(:dead_letter_exchange, "#{exchange}.dead-letter")
-          |> Map.put_new(:dead_letter_queue, "#{queue}_error")
-          |> Map.put_new(:prefetch_count, 10)
-          |> Map.put_new(:concurrency, true)
-          |> Map.put_new(:consumer_tag, to_string(__MODULE__))
-          |> Map.put_new(:restart_delay, 5000)
-
+      def init(_) do
         Process.flag(:trap_exit, true)
         send(self(), :init)
-        {:ok, %{chan: nil, config: config}}
+        {:ok, %{chan: nil, config: %{}, attempt: 0}}
+      end
+
+      @impl GenServer
+      def handle_info(:init, state) do
+        config = normalized_config()
+        attempt = state.attempt + 1
+
+        with {:ok, conn} <- config[:connection].get_connection(),
+             {:ok, chan} <- AMQP.Channel.open(conn) do
+          Process.monitor(chan.pid)
+          setup_queue(chan, config)
+          Logger.info("[#{__MODULE__}] Ready")
+          {:noreply, %{state | config: config, attempt: attempt, chan: chan}}
+        else
+          error ->
+            time = RMQ.Utils.reconnect_interval(config[:reconnect_interval], attempt)
+
+            Logger.error(
+              "[#{__MODULE__}] No connection: #{inspect(error)}. Retrying in #{time}ms"
+            )
+
+            Process.send_after(self(), :init, time)
+            {:noreply, %{state | config: config, attempt: attempt}}
+        end
       end
 
       # Confirmation sent by the broker after registering this process as a consumer
@@ -128,79 +236,33 @@ defmodule RMQ.Consumer do
 
       @impl GenServer
       def handle_info({:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
-        if config.concurrency do
-          spawn(fn -> consume(chan, process(payload, meta), meta) end)
+        if config[:concurrency] do
+          spawn(fn -> consume(chan, payload, meta) end)
         else
-          consume(chan, process(payload, meta), meta)
+          consume(chan, payload, meta)
         end
 
         {:noreply, state}
       end
 
       @impl GenServer
-      def handle_info(:init, %{config: config} = state) do
-        case @connection.get_connection() do
-          {:ok, conn} ->
-            {:ok, chan} = AMQP.Channel.open(conn)
-            Process.monitor(chan.pid)
-            arguments = setup_dead_letter(chan, config)
-            setup_queue(chan, config, arguments)
-            Logger.info("[#{__MODULE__}] Consumer started")
-            {:noreply, %{state | chan: chan}}
-
-          {:error, :not_connected} ->
-            Process.send_after(self(), :init, config.restart_delay)
-            {:noreply, state}
-        end
-      end
-
-      @impl GenServer
       def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-        Logger.warn("[#{__MODULE__}] Consumer down due to #{inspect(reason)}. Restarting...")
-        Process.send_after(self(), :init, state.config.restart_delay)
-        {:noreply, %{state | chan: nil}}
+        Logger.error("[#{__MODULE__}] Connection lost: #{inspect(reason)}. Reconnecting...")
+        send(self(), :init)
+        {:noreply, state}
       end
 
       @impl GenServer
-      def terminate(_reason, %{chan: chan}) do
-        unless is_nil(chan), do: AMQP.Channel.close(chan)
+      def terminate(_reason, state) do
+        unless is_nil(state.chan), do: AMQP.Channel.close(state.chan)
         :ok
       end
 
-      defp setup_queue(chan, config, arguments) do
-        {type, exchange} = normalize_exchange(config.exchange)
-
-        {:ok, %{queue: queue}} =
-          AMQP.Queue.declare(chan, config.queue, durable: true, arguments: arguments)
-
-        # skip declaring default exchange
-        unless exchange == "" do
-          :ok = AMQP.Exchange.declare(chan, exchange, type, durable: true)
-          :ok = AMQP.Queue.bind(chan, queue, exchange, routing_key: config.routing_key)
-        end
-
-        :ok = AMQP.Basic.qos(chan, prefetch_count: config.prefetch_count)
-        {:ok, _} = AMQP.Basic.consume(chan, queue, nil, consumer_tag: config.consumer_tag)
+      defp normalized_config do
+        RMQ.Consumer.normalize_config(__MODULE__)
       end
 
-      defp setup_dead_letter(_chan, %{dead_letter: false}), do: []
-
-      defp setup_dead_letter(chan, %{dead_letter: true} = config) do
-        {type, exchange} = normalize_exchange(config.dead_letter_exchange)
-        {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, config.dead_letter_queue, durable: true)
-        :ok = AMQP.Exchange.declare(chan, exchange, type, durable: true)
-        :ok = AMQP.Queue.bind(chan, queue, exchange)
-
-        [
-          {"x-dead-letter-exchange", :longstr, exchange},
-          {"x-dead-letter-routing-key", :longstr, config.dead_letter_routing_key}
-        ]
-      end
-
-      defp normalize_exchange({type, name}), do: {type, name}
-      defp normalize_exchange(name), do: {:direct, name}
-
-      defoverridable process: 2
+      defoverridable config: 0, setup_queue: 2
     end
   end
 end

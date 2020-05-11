@@ -13,25 +13,31 @@ defmodule RMQ.TestHelpers do
     |> binary_part(0, 10)
   end
 
-  defmacro define_consumer(name, config) do
+  defmacro define_consumer(name, conf, dynamic \\ false) do
     quote do
       defmodule unquote(name) do
-        use RMQ.Consumer, unquote(config)
+        use RMQ.Consumer, unless(unquote(dynamic), do: unquote(conf), else: [])
 
-        @impl RMQ.Consumer
-        def process(message, %{content_type: "application/json"}), do: Jason.decode!(message)
-        def process(message, _meta), do: message
+        # @impl RMQ.Consumer
+        # def setup_queue(chan, queue) do
+        #   super(chan, queue)
+        # end
 
         @impl RMQ.Consumer
         def consume(chan, message, meta) do
-          send(:current_test, {:consumed, message, meta})
+          message =
+            case meta.content_type do
+              "application/json" -> Jason.decode!(message)
+              _ -> message
+            end
+
+          Process.send_after(:current_test, {:consumed, message, meta}, 50)
           ack(chan, meta.delivery_tag)
         end
 
-        def queue(pid), do: pid |> config() |> Map.get(:queue)
-        def exchange(pid), do: pid |> config() |> Map.get(:exchange)
-        def config(pid), do: pid |> state() |> Map.get(:config)
-        def state(pid) when is_pid(pid), do: :sys.get_state(pid)
+        if unquote(dynamic) do
+          def config, do: unquote(conf)
+        end
       end
     end
   end
