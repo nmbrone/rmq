@@ -1,11 +1,22 @@
 defmodule RMQ.RPCTest do
   use RMQ.Case
 
+  @moduletag :capture_log
+
   defmodule Worker do
-    use RMQ.RPC,
-      connection: RMQ.TestConnection,
-      publishing_options: [app_id: "RMQ Test"],
-      restart_delay: 100
+    use RMQ.RPC
+
+    def setup_queue(chan, config) do
+      super(chan, config)
+    end
+
+    def config do
+      [
+        connection: RMQ.TestConnection,
+        publishing_options: [app_id: "RMQ Test"],
+        reconnect_interval: fn _ -> 200 end
+      ]
+    end
   end
 
   defmodule Worker2 do
@@ -14,7 +25,7 @@ defmodule RMQ.RPCTest do
       exchange: "rmq"
   end
 
-  setup_all do
+  setup do
     {:ok, conn} = RMQ.TestConnection.get_connection()
     {:ok, chan} = AMQP.Channel.open(conn)
 
@@ -41,14 +52,17 @@ defmodule RMQ.RPCTest do
     %{conn: conn, chan: chan, queue: queue, slow_queue: slow_queue}
   end
 
-  test "performs call", ctx do
-    res = Worker.call(ctx.queue, %{user_id: "USR"})
-    assert res == %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
+  test "performs the call", ctx do
+    res = {:ok, %{"response" => %{"ok" => true}, "params" => %{}}}
+    assert res == Worker.call(ctx.queue)
+    assert res == Worker.call(ctx.queue, %{})
+    assert res == Worker.call(ctx.queue, %{}, app_id: "TestApp")
+    assert res == Worker.call(ctx.queue, %{}, [app_id: "TestApp"], 1000)
   end
 
   test "handles multiple calls from different processes", %{queue: queue, slow_queue: slow_queue} do
     params = %{user_id: "USR"}
-    response = %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}
+    response = {:ok, %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}}
     me = self()
 
     for q <- [slow_queue, queue] do
@@ -62,9 +76,9 @@ defmodule RMQ.RPCTest do
     assert_receive {^slow_queue, ^response}, 300
   end
 
-  test "handles multiple calls from same process", %{queue: queue, slow_queue: slow_queue} do
-    assert %{"params" => %{"req" => 1}} = Worker.call(slow_queue, %{req: 1})
-    assert %{"params" => %{"req" => 2}} = Worker.call(queue, %{req: 2})
+  test "handles multiple calls from the same process", %{queue: queue, slow_queue: slow_queue} do
+    assert {:ok, %{"params" => %{"req" => 1}}} = Worker.call(slow_queue, %{req: 1})
+    assert {:ok, %{"params" => %{"req" => 2}}} = Worker.call(queue, %{req: 2})
   end
 
   test "works with non default exchange", %{chan: chan} do
@@ -86,7 +100,7 @@ defmodule RMQ.RPCTest do
     end)
 
     start_supervised!(Worker2)
-    assert %{"response" => _} = Worker2.call(queue, %{})
+    assert {:ok, _} = Worker2.call(queue, %{})
   end
 
   test "correctly merges publishing options", %{queue: queue} do
@@ -98,5 +112,17 @@ defmodule RMQ.RPCTest do
 
     Worker.call(queue, params, app_id: "RMQ RPC Test", timestamp: timestamp)
     assert_receive {:consumed, ^params, %{app_id: "RMQ RPC Test", timestamp: ^timestamp}}
+  end
+
+  test "reconnects in a case of losing connection", %{conn: conn, queue: queue} do
+    Process.sleep(100)
+    AMQP.Connection.close(conn)
+    assert {:error, :not_connected} = Worker.call(queue)
+    Process.sleep(100)
+    assert {:error, :not_connected} = Worker.call(queue)
+    Process.sleep(100)
+    # we got timeout here since the consumer for the queue which is defined in :setup block
+    # was canceled when the connection was lost
+    assert {:error, :timeout} = Worker.call(queue, %{}, [], 100)
   end
 end

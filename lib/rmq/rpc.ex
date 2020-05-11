@@ -2,35 +2,42 @@ defmodule RMQ.RPC do
   @moduledoc """
   RPC via RabbitMQ.
 
-  In short, it's a `GenServer` which Implements a publisher and a consumer in one place.
+  In short, it's a `GenServer` which implements a publisher and a consumer at once.
 
-  A module which will implement this behaviour will be able to publish messages
-  via `c:call/4` and wait for a response.
-
-  You can read more about how this works
-  in the [tutorial](https://www.rabbitmq.com/tutorials/tutorial-six-python.html).
+  You can read more about how this works in the
+  [tutorial](https://www.rabbitmq.com/tutorials/tutorial-six-python.html).
 
   ## Configuration
 
     * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
-    * `:exchange` - the name of the exchange to which RPC consuming queue is bound.
-      Please make sure the exchange exist. Defaults to `""`.
-    * `:timeout` - default timeout for `c:call/4`. Will be passed directly to the underlying
-      call of `GenServer.call/3` Defaults to `5000`.
-    * `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
-    * `:restart_delay` - Defaults to `5000`;
+    * `:queue` - the queue name to which the module will be subscribed for consuming responses.
+      Defaults to `""` which means the broker will assign a name to a newly created queue by itself;
+    * `:exchange` - the exchange name to which `:queue` will be bound.
+      Please make sure the exchange exist. Defaults to `""` - the default exchange;
+    * `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
     * `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
-      `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
-      and cannot be overridden. Defaults to `[]`.
+      _reply_to_, _correlation_id_, _content_type_ - these will be set automatically
+      and cannot be overridden. Defaults to `[]`;
+    * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
+      accepts the current connection attempt as a number and returns a new interval.
+      Defaults to `5000`.
 
-  ## Example usage with `RMQ.Consumer`
+  ## Example
 
   Application 1:
 
+      defmodule MyApp.RemoteResource do
+        use RMQ.RPC, publishing_options: [app_id: "MyApp"]
+
+        def find_by_id(id) do
+          call("remote-resource-finder", %{id: id}, timeout: 10_000)
+        end
+      end
+
+  Application 2:
+
       defmodule MyOtherApp.Consumer do
-        use RMQ.Consumer,
-          connection: MyOtherApp.RabbitConnection,
-          queue: "remote-resource-finder"
+        use RMQ.Consumer, queue: "remote-resource-finder"
 
         @impl RMQ.Consumer
         def consume(chan, payload, meta) do
@@ -49,166 +56,229 @@ defmodule RMQ.RPC do
         end
       end
 
-  Application 2:
-
-      defmodule MyApp.RemoteResource do
-        use RMQ.RPC,
-          connection: MyApp.RabbitConnection,
-          publishing_options: [app_id: "MyApp"]
-
-        def find_by_id(id) do
-          call("remote-resource-finder", %{id: id})
-        end
-      end
-
   """
 
-  @doc "Starts a `GenServer` process linked to the current process."
-  @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
+  require Logger
+
+  @defaults [
+    connection: RMQ.Connection,
+    queue: "",
+    exchange: "",
+    publishing_options: [],
+    reconnect_interval: 5000
+  ]
 
   @doc """
-  Performs remote procedure call.
+  A callback for dynamic configuration.
 
-   - `options` - same as `publishing_options` but have precedence over them. Can be omitted.
-   - `timeout` - same as timeout in configuration. Can be omitted.
+  Will be called before `c:setup_queue/2`.
   """
-  @callback call(
-              queue :: String.t(),
-              payload :: any(),
-              options :: Keyword.t(),
-              timeout()
-            ) :: any()
+  @callback config() :: keyword()
+
+  @doc """
+  Does all the job on preparing the queue.
+
+  Whenever you need full control over configuring the queue you can implement this callback and
+  use `AMQP` library directly.
+
+  See `setup_queue/2` for the default implementation.
+  """
+  @callback setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: binary()
+
+  @doc false
+  def start_link(module, opts) do
+    GenServer.start_link(module, module, Keyword.put_new(opts, :name, module))
+  end
+
+  @doc """
+  Performs a call against the given module.
+
+  Here `options` is a keyword list which will be merged into `:publishing_options` during the call
+  and `timeout` is the timeout in milliseconds for the inner GenServer call.
+
+  The payload will be encoded by using `Jason.encode!/1`.
+  """
+  @spec call(
+          module :: module(),
+          queue :: binary(),
+          payload :: any(),
+          options :: keyword(),
+          timeout :: integer()
+        ) :: {:ok, any()} | {:error, :not_connected} | {:error, :timeout} | {:error, any()}
+  def call(module, queue, payload \\ %{}, options \\ [], timeout \\ 5000) do
+    GenServer.call(module, {:publish, queue, payload, options}, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, :timeout}
+  end
+
+  @doc """
+  The default implementation for `c:setup_queue/2` callback.
+  """
+  @spec setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: binary()
+  def setup_queue(chan, conf) do
+    {:ok, %{queue: queue}} =
+      AMQP.Queue.declare(chan, conf[:queue], exclusive: true, auto_delete: true)
+
+    unless conf[:exchange] == "" do
+      :ok = AMQP.Queue.bind(chan, queue, conf[:exchange], routing_key: queue)
+    end
+
+    {:ok, _} = AMQP.Basic.consume(chan, queue, nil, consumer_tag: conf[:consumer_tag])
+    queue
+  end
+
+  @doc false
+  def init(_module, _arg) do
+    Process.flag(:trap_exit, true)
+    send(self(), :init)
+    {:ok, %{chan: nil, queue: nil, pids: %{}, config: %{}, attempt: 0}}
+  end
+
+  @doc false
+  def handle_call(_module, {:publish, _queue, _payload, _options}, _from, %{chan: nil} = state) do
+    {:reply, {:error, :not_connected}, state}
+  end
+
+  def handle_call(module, {:publish, queue, payload, options}, from, %{config: config} = state) do
+    correlation_id = UUID.uuid1()
+
+    options =
+      config[:publishing_options]
+      |> Keyword.merge(options)
+      |> Keyword.put(:reply_to, state.queue)
+      |> Keyword.put(:correlation_id, correlation_id)
+      |> Keyword.put(:content_type, "application/json")
+
+    Logger.debug("""
+    [#{module}] Publishing >>>
+      Queue: #{inspect(queue)}
+      Payload: #{inspect(payload)}
+    """)
+
+    payload =
+      case Jason.encode(payload) do
+        {:ok, encoded} -> encoded
+        _ -> payload
+      end
+
+    case AMQP.Basic.publish(state.chan, config[:exchange], queue, payload, options) do
+      :ok -> {:noreply, put_in(state.pids[correlation_id], from)}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @doc false
+  def handle_info(module, :init, %{attempt: attempt} = state) do
+    config = module_config(module)
+    attempt = attempt + 1
+
+    with {:ok, conn} <- config[:connection].get_connection(),
+         {:ok, chan} <- AMQP.Channel.open(conn) do
+      Process.monitor(chan.pid)
+      queue = apply(module, :setup_queue, [chan, config])
+      Logger.info("[#{module}] Ready")
+      {:noreply, %{state | chan: chan, queue: queue, config: config, attempt: attempt}}
+    else
+      error ->
+        time = RMQ.Utils.reconnect_interval(config[:reconnect_interval], attempt)
+        Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
+        Process.send_after(self(), :init, time)
+        {:noreply, %{state | config: config, attempt: attempt}}
+    end
+  end
+
+  # Confirmation sent by the broker after registering this process as a consumer
+  def handle_info(_module, {:basic_consume_ok, _meta}, state) do
+    {:noreply, state}
+  end
+
+  # Sent by the broker when the consumer is unexpectedly cancelled (such as after a queue deletion)
+  def handle_info(_module, {:basic_cancel, _meta}, state) do
+    {:stop, :normal, state}
+  end
+
+  # Confirmation sent by the broker to the consumer process after a Basic.cancel
+  def handle_info(_module, {:basic_cancel_ok, _meta}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info(module, {:basic_deliver, payload, meta}, state) do
+    {pid, state} = pop_in(state.pids[meta.correlation_id])
+
+    unless is_nil(pid) do
+      payload =
+        case Jason.decode(payload) do
+          {:ok, decoded} -> decoded
+          _ -> payload
+        end
+
+      Logger.debug("""
+      [#{module}] Consuming <<<
+        Queue: #{inspect(meta.routing_key)}
+        Payload: #{inspect(payload)}
+      """)
+
+      GenServer.reply(pid, {:ok, payload})
+      AMQP.Basic.ack(state.chan, meta.delivery_tag)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
+    Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
+    send(self(), :init)
+    {:noreply, %{state | chan: nil}}
+  end
+
+  def handle_info(module, :shutdown = reason, state) do
+    terminate(module, reason, state)
+    {:noreply, state}
+  end
+
+  @doc false
+  def terminate(_module, _reason, %{chan: chan}) do
+    RMQ.Utils.close_channel(chan)
+  end
+
+  defp module_config(module) do
+    @defaults
+    |> Keyword.merge(apply(module, :config, []))
+    |> Keyword.put_new(:consumer_tag, to_string(module))
+  end
 
   defmacro __using__(opts \\ []) do
-    quote location: :keep, bind_quoted: [opts: opts] do
-      require Logger
+    quote location: :keep do
       use GenServer
 
       @behaviour RMQ.RPC
-      @connection Keyword.get(opts, :connection, RMQ.Connection)
+      @config unquote(opts)
 
-      @config %{
-        exchange: Keyword.get(opts, :exchange, ""),
-        consumer_tag: Keyword.get(opts, :consumer_tag, to_string(__MODULE__)),
-        publishing_options: Keyword.get(opts, :publishing_options, []),
-        restart_delay: Keyword.get(opts, :restart_delay, 5000),
-        timeout: Keyword.get(opts, :timeout, 5000)
-      }
+      def start_link(opts), do: RMQ.RPC.start_link(__MODULE__, opts)
 
-      @impl RMQ.RPC
-      def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, nil, Keyword.put_new(opts, :name, __MODULE__))
+      def call(queue, payload \\ %{}, options \\ [], timeout \\ 5000) do
+        RMQ.RPC.call(__MODULE__, queue, payload, options, timeout)
       end
 
       @impl RMQ.RPC
-      def call(queue, payload, options \\ [], timeout \\ @config.timeout) when is_list(options) do
-        GenServer.call(__MODULE__, {:publish, queue, payload, options}, timeout)
-      end
+      def config, do: @config
+
+      @impl RMQ.RPC
+      def setup_queue(chan, config), do: RMQ.RPC.setup_queue(chan, config)
 
       @impl GenServer
-      def init(_) do
-        send(self(), :init)
-        {:ok, %{chan: nil, queue: nil, pids: %{}}}
-      end
+      def init(arg), do: RMQ.RPC.init(__MODULE__, arg)
 
       @impl GenServer
-      def handle_call({:publish, queue, payload, options}, from, state) do
-        correlation_id = UUID.uuid1()
-
-        options =
-          @config.publishing_options
-          |> Keyword.merge(options)
-          |> Keyword.put(:reply_to, state.queue)
-          |> Keyword.put(:correlation_id, correlation_id)
-          |> Keyword.put(:content_type, "application/json")
-
-        Logger.debug("""
-        [#{__MODULE__}] publishing
-          Queue: #{inspect(queue)}
-          Payload: #{inspect(payload)}
-        """)
-
-        AMQP.Basic.publish(state.chan, @config.exchange, queue, Jason.encode!(payload), options)
-        {:noreply, put_in(state.pids[correlation_id], from)}
-      end
+      def handle_call(msg, from, state), do: RMQ.RPC.handle_call(__MODULE__, msg, from, state)
 
       @impl GenServer
-      def handle_info(:init, state) do
-        case @connection.get_connection() do
-          {:ok, conn} ->
-            {:ok, chan} = AMQP.Channel.open(conn)
-            Process.monitor(chan.pid)
-            queue = setup_callback_queue(chan)
-            Logger.info("[#{__MODULE__}] RPC started")
-            {:noreply, %{state | chan: chan, queue: queue}}
-
-          {:error, :not_connected} ->
-            Process.send_after(self(), :init, @config.restart_delay)
-            {:noreply, state}
-        end
-      end
-
-      # Confirmation sent by the broker after registering this process as a consumer
-      @impl GenServer
-      def handle_info({:basic_consume_ok, _meta}, state) do
-        {:noreply, state}
-      end
-
-      # Sent by the broker when the consumer is unexpectedly cancelled (such as after a queue deletion)
-      @impl GenServer
-      def handle_info({:basic_cancel, _meta}, state) do
-        {:stop, :normal, state}
-      end
-
-      # Confirmation sent by the broker to the consumer process after a Basic.cancel
-      @impl GenServer
-      def handle_info({:basic_cancel_ok, _meta}, state) do
-        {:noreply, state}
-      end
+      def handle_info(msg, state), do: RMQ.RPC.handle_info(__MODULE__, msg, state)
 
       @impl GenServer
-      def handle_info({:basic_deliver, payload, meta}, state) do
-        {pid, state} = pop_in(state.pids[meta.correlation_id])
+      def terminate(reason, state), do: RMQ.RPC.terminate(__MODULE__, reason, state)
 
-        unless is_nil(pid) do
-          payload = Jason.decode!(payload)
-
-          Logger.debug("""
-          [#{__MODULE__}] consuming
-            Queue: #{inspect(meta.routing_key)}
-            Payload: #{inspect(payload)}
-          """)
-
-          GenServer.reply(pid, payload)
-          AMQP.Basic.ack(state.chan, meta.delivery_tag)
-        end
-
-        {:noreply, state}
-      end
-
-      @impl GenServer
-      def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-        Logger.warn("[#{__MODULE__}] RPC down due to #{inspect(reason)}. Restarting...")
-        Process.send_after(self(), :init, @config.restart_delay)
-        {:noreply, state}
-      end
-
-      @impl GenServer
-      def terminate(_reason, %{chan: chan}) do
-        unless is_nil(chan), do: AMQP.Channel.close(chan)
-        :ok
-      end
-
-      defp setup_callback_queue(chan) do
-        {:ok, %{queue: queue}} = AMQP.Queue.declare(chan, "", exclusive: true, auto_delete: true)
-
-        unless @config.exchange == "" do
-          :ok = AMQP.Queue.bind(chan, queue, @config.exchange, routing_key: queue)
-        end
-
-        {:ok, _} = AMQP.Basic.consume(chan, queue, nil, consumer_tag: @config.consumer_tag)
-        queue
-      end
+      defoverridable config: 0, setup_queue: 2
     end
   end
 end
