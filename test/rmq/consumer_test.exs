@@ -87,7 +87,7 @@ defmodule RMQ.ConsumerTest do
     refute exchange_exist?(chan, {:direct, dl_exchange})
   end
 
-  test "automatically restarts", %{conn: conn, chan: chan} do
+  test "reconnects in case of losing connection", %{conn: conn, chan: chan} do
     start_supervised!(Consumer4)
     Process.sleep(100)
     message = "Hello, World!"

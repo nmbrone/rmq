@@ -59,6 +59,8 @@ defmodule RMQ.Consumer do
 
   """
 
+  require Logger
+
   @defaults [
     connection: RMQ.Connection,
     exchange: "",
@@ -67,9 +69,6 @@ defmodule RMQ.Consumer do
     reconnect_interval: 5000,
     concurrency: true
   ]
-
-  @doc "Starts a `GenServer` process linked to the current process."
-  @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
 
   @doc """
   A callback for consuming a message.
@@ -89,41 +88,93 @@ defmodule RMQ.Consumer do
   @doc """
   A callback for dynamic configuration.
   """
-  @callback config() :: keyword() | map()
+  @callback config() :: keyword()
 
   @doc """
   Does all the job on preparing the queue.
 
-  Please refer to `setup_queue/2` to see the default implementation for this callback.
-
   Whenever you need full control over configuring the queue you can implement this callback and
   use `AMQP` library directly.
+
+  See `setup_queue/2` for the default implementation.
   """
   @callback setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: :ok
 
   @doc false
-  def normalize_config(config) when is_list(config) do
-    config = Keyword.merge(@defaults, config)
-    queue = Keyword.fetch!(config, :queue)
-    exchange = Keyword.fetch!(config, :exchange) |> normalize_exchange() |> elem(1)
-    dl_exchange = String.replace_prefix("#{exchange}.dead-letter", ".", "")
-
-    config
-    |> Keyword.put_new(:routing_key, queue)
-    |> Keyword.put_new(:dead_letter_routing_key, queue)
-    |> Keyword.put_new(:dead_letter_exchange, dl_exchange)
-    |> Keyword.put_new(:dead_letter_queue, "#{queue}_error")
+  def start_link(module, opts) do
+    GenServer.start_link(module, module, Keyword.put_new(opts, :name, module))
   end
 
   @doc false
-  def normalize_config(module) when is_atom(module) do
-    module.config()
-    |> normalize_config()
-    |> Keyword.put_new(:consumer_tag, to_string(module))
+  def init(_module, _arg) do
+    Process.flag(:trap_exit, true)
+    send(self(), :init)
+    {:ok, %{chan: nil, config: %{}, attempt: 0}}
+  end
+
+  @doc false
+  def handle_info(module, :init, %{attempt: attempt} = state) do
+    config = module_config(module)
+    attempt = attempt + 1
+
+    with {:ok, conn} <- config[:connection].get_connection(),
+         {:ok, chan} <- AMQP.Channel.open(conn) do
+      Process.monitor(chan.pid)
+      apply(module, :setup_queue, [chan, config])
+      Logger.info("[#{module}] Ready")
+      {:noreply, %{state | config: config, attempt: attempt, chan: chan}}
+    else
+      error ->
+        time = RMQ.Utils.reconnect_interval(config[:reconnect_interval], attempt)
+        Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
+        Process.send_after(self(), :init, time)
+        {:noreply, %{state | config: config, attempt: attempt}}
+    end
+  end
+
+  # Confirmation sent by the broker after registering this process as a consumer
+  def handle_info(_module, {:basic_consume_ok, _meta}, state) do
+    {:noreply, state}
+  end
+
+  # Sent by the broker when the consumer is unexpectedly cancelled (such as after a queue deletion)
+  def handle_info(_module, {:basic_cancel, _meta}, state) do
+    {:stop, :normal, state}
+  end
+
+  # Confirmation sent by the broker to the consumer process after a Basic.cancel
+  def handle_info(_module, {:basic_cancel_ok, _meta}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info(module, {:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
+    if config[:concurrency] do
+      spawn(fn -> apply(module, :consume, [chan, payload, meta]) end)
+    else
+      apply(module, :consume, [chan, payload, meta])
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
+    Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
+    send(self(), :init)
+    {:noreply, %{state | chan: nil}}
+  end
+
+  def handle_info(module, :shutdown = reason, state) do
+    terminate(module, reason, state)
+    {:noreply, state}
+  end
+
+  @doc false
+  def terminate(_module, _reason, %{chan: chan}) do
+    RMQ.Utils.close_channel(chan)
   end
 
   @doc """
-  Holds the default implementation for `c:setup_queue/2` callback.
+  The default implementation for `c:setup_queue/2` callback.
   """
   @spec setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: :ok
   def setup_queue(chan, config) do
@@ -165,19 +216,30 @@ defmodule RMQ.Consumer do
   defp normalize_exchange({type, name}), do: {type, name}
   defp normalize_exchange(name), do: {:direct, name}
 
+  defp module_config(module) do
+    config = Keyword.merge(@defaults, apply(module, :config, []))
+    queue = Keyword.fetch!(config, :queue)
+    exchange = Keyword.fetch!(config, :exchange) |> normalize_exchange() |> elem(1)
+    dl_exchange = String.replace_prefix("#{exchange}.dead-letter", ".", "")
+
+    config
+    |> Keyword.put_new(:routing_key, queue)
+    |> Keyword.put_new(:dead_letter_routing_key, queue)
+    |> Keyword.put_new(:dead_letter_exchange, dl_exchange)
+    |> Keyword.put_new(:dead_letter_queue, "#{queue}_error")
+    |> Keyword.put_new(:consumer_tag, to_string(module))
+  end
+
   defmacro __using__(opts \\ []) do
     quote location: :keep do
       use GenServer
-      require Logger
+
       import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2, publish: 5, publish: 4]
 
       @behaviour RMQ.Consumer
       @config unquote(opts)
 
-      @impl RMQ.Consumer
-      def start_link(opts \\ []) do
-        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
-      end
+      def start_link(opts), do: RMQ.Consumer.start_link(__MODULE__, opts)
 
       @impl RMQ.Consumer
       def setup_queue(chan, config), do: RMQ.Consumer.setup_queue(chan, config)
@@ -186,81 +248,13 @@ defmodule RMQ.Consumer do
       def config, do: @config
 
       @impl GenServer
-      def init(_) do
-        Process.flag(:trap_exit, true)
-        send(self(), :init)
-        {:ok, %{chan: nil, config: %{}, attempt: 0}}
-      end
+      def init(arg), do: RMQ.Consumer.init(__MODULE__, arg)
 
       @impl GenServer
-      def handle_info(:init, state) do
-        config = normalized_config()
-        attempt = state.attempt + 1
-
-        with {:ok, conn} <- config[:connection].get_connection(),
-             {:ok, chan} <- AMQP.Channel.open(conn) do
-          Process.monitor(chan.pid)
-          setup_queue(chan, config)
-          Logger.info("[#{__MODULE__}] Ready")
-          {:noreply, %{state | config: config, attempt: attempt, chan: chan}}
-        else
-          error ->
-            time = RMQ.Utils.reconnect_interval(config[:reconnect_interval], attempt)
-
-            Logger.error(
-              "[#{__MODULE__}] No connection: #{inspect(error)}. Retrying in #{time}ms"
-            )
-
-            Process.send_after(self(), :init, time)
-            {:noreply, %{state | config: config, attempt: attempt}}
-        end
-      end
-
-      # Confirmation sent by the broker after registering this process as a consumer
-      @impl GenServer
-      def handle_info({:basic_consume_ok, meta}, state) do
-        {:noreply, state}
-      end
-
-      # Sent by the broker when the consumer is unexpectedly cancelled (such as after a queue deletion)
-      @impl GenServer
-      def handle_info({:basic_cancel, meta}, state) do
-        {:stop, :normal, state}
-      end
-
-      # Confirmation sent by the broker to the consumer process after a Basic.cancel
-      @impl GenServer
-      def handle_info({:basic_cancel_ok, meta}, state) do
-        {:noreply, state}
-      end
+      def handle_info(msg, state), do: RMQ.Consumer.handle_info(__MODULE__, msg, state)
 
       @impl GenServer
-      def handle_info({:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
-        if config[:concurrency] do
-          spawn(fn -> consume(chan, payload, meta) end)
-        else
-          consume(chan, payload, meta)
-        end
-
-        {:noreply, state}
-      end
-
-      @impl GenServer
-      def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-        Logger.error("[#{__MODULE__}] Connection lost: #{inspect(reason)}. Reconnecting...")
-        send(self(), :init)
-        {:noreply, state}
-      end
-
-      @impl GenServer
-      def terminate(_reason, state) do
-        unless is_nil(state.chan), do: AMQP.Channel.close(state.chan)
-        :ok
-      end
-
-      defp normalized_config do
-        RMQ.Consumer.normalize_config(__MODULE__)
-      end
+      def terminate(reason, state), do: RMQ.Consumer.handle_info(__MODULE__, reason, state)
 
       defoverridable config: 0, setup_queue: 2
     end

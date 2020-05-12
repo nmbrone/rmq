@@ -114,7 +114,7 @@ defmodule RMQ.RPCTest do
     assert_receive {:consumed, ^params, %{app_id: "RMQ RPC Test", timestamp: ^timestamp}}
   end
 
-  test "reconnects in a case of losing connection", %{conn: conn, queue: queue} do
+  test "reconnects in case of losing connection", %{conn: conn, queue: queue} do
     Process.sleep(100)
     AMQP.Connection.close(conn)
     assert {:error, :not_connected} = Worker.call(queue)
