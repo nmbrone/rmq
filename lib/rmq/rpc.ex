@@ -30,7 +30,7 @@ defmodule RMQ.RPC do
         use RMQ.RPC, publishing_options: [app_id: "MyApp"]
 
         def find_by_id(id) do
-          call("remote-resource-finder", %{id: id}, timeout: 10_000)
+          call("remote-resource-finder", %{id: id})
         end
       end
 

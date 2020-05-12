@@ -72,12 +72,6 @@ defmodule RMQ.Connection do
   use GenServer
   require Logger
 
-  @doc "Starts a `GenServer` process linked to the current process."
-  @callback start_link(options :: [GenServer.option()]) :: GenServer.on_start()
-
-  @doc "Gets the connection."
-  @callback get_connection() :: {:ok, AMQP.Connection.t()} | {:error, :not_connected}
-
   @doc """
   A callback invoked right before connection.
 
@@ -93,37 +87,34 @@ defmodule RMQ.Connection do
         Keyword.merge(super(), uri: System.get_env("RABBITMQ_URI"))
       end
   """
-  @callback config() :: Keyword.t()
+  @callback config() :: keyword()
 
-  def start_link(opts) when is_list(opts), do: start_link(__MODULE__, opts)
+  @doc "Starts a `GenServer` process linked to the current process."
+  def start_link(opts), do: start_link(__MODULE__, opts)
 
-  @doc false
-  def start_link(module, opts \\ []) do
-    GenServer.start_link(module, :ok, Keyword.put_new(opts, :name, module))
+  @doc "Starts a `GenServer` process linked to the current process."
+  def start_link(module, opts) do
+    GenServer.start_link(__MODULE__, module, Keyword.put(opts, :name, module))
   end
 
   @doc "Gets the connection."
-  @spec get_connection(server :: GenServer.server()) ::
+  @spec get_connection(module :: module()) ::
           {:ok, AMQP.Connection.t()} | {:error, :not_connected}
-  def get_connection(server \\ __MODULE__) do
-    case GenServer.call(server, :get) do
+  def get_connection(module \\ __MODULE__) do
+    case GenServer.call(module, :get) do
       nil -> {:error, :not_connected}
       conn -> {:ok, conn}
     end
   end
 
-  @doc "An alias for `get_connection/1`."
-  @spec get() :: {:ok, AMQP.Connection.t()} | {:error, :not_connected}
-  def get(), do: get_connection(__MODULE__)
-
   @doc "Returns the configuration."
   def config(), do: Application.get_env(:rmq, :connection, [])
 
   @impl GenServer
-  def init(_) do
+  def init(module) do
     Process.flag(:trap_exit, true)
     send(self(), :connect)
-    {:ok, %{conn: nil, attempt: 0}}
+    {:ok, %{module: module, conn: nil, attempt: 0}}
   end
 
   @impl GenServer
@@ -132,22 +123,12 @@ defmodule RMQ.Connection do
   end
 
   @impl GenServer
-  def handle_info(msg, state) do
-    handle_info(__MODULE__, msg, state)
-  end
-
-  @impl GenServer
-  def terminate(_reason, state) do
-    unless is_nil(state.conn), do: AMQP.Connection.close(state.conn)
-    :ok
-  end
-
-  @doc false
-  def handle_info(module, :connect, state) do
-    {uri, options} = Keyword.pop(module.config(), :uri, "amqp://localhost")
+  def handle_info(:connect, %{module: module, attempt: attempt} = state) do
+    config = apply(module, :config, [])
+    {uri, options} = Keyword.pop(config, :uri, "amqp://localhost")
     {name, options} = Keyword.pop(options, :name, :undefined)
     {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 5000)
-    attempt = state.attempt + 1
+    attempt = attempt + 1
 
     case AMQP.Connection.open(uri, name, options) do
       {:ok, conn} ->
@@ -168,40 +149,32 @@ defmodule RMQ.Connection do
     end
   end
 
-  def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
+  def handle_info({:DOWN, _ref, :process, _pid, reason}, %{module: module} = state) do
     Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
     send(self(), :connect)
     {:noreply, %{state | conn: nil}}
+  end
+
+  @impl GenServer
+  def terminate(_reason, %{conn: conn}) do
+    unless is_nil(conn), do: AMQP.Connection.close(conn)
+    :ok
   end
 
   @doc false
   defmacro __using__(opts \\ []) do
     quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour RMQ.Connection
-
-      use GenServer
-
       @otp_app Keyword.get(opts, :otp_app, :rmq)
 
-      @impl RMQ.Connection
+      def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
       def start_link(opts), do: RMQ.Connection.start_link(__MODULE__, opts)
 
-      @impl RMQ.Connection
       def get_connection(), do: RMQ.Connection.get_connection(__MODULE__)
-
-      def get(), do: RMQ.Connection.get_connection(__MODULE__)
 
       @impl RMQ.Connection
       def config(), do: Application.get_env(@otp_app, __MODULE__, [])
-
-      @impl GenServer
-      def init(_), do: RMQ.Connection.init(:ok)
-
-      @impl GenServer
-      def handle_call(msg, from, state), do: RMQ.Connection.handle_call(msg, from, state)
-
-      @impl GenServer
-      def handle_info(msg, state), do: RMQ.Connection.handle_info(__MODULE__, msg, state)
 
       defoverridable config: 0
     end

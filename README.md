@@ -4,7 +4,7 @@
 [![Hex version badge](https://img.shields.io/hexpm/v/rmq.svg)](https://hex.pm/packages/rmq)
 
 A set of handy tools for working with RabbitMQ in Elixir projects.
-Based on [`amqp`](https://github.com/pma/amqp) elixir client.
+Based on [`amqp`](https://github.com/pma/amqp) elixir library.
 
 ## Installation
 
@@ -13,7 +13,7 @@ The package can be installed by adding `rmq` to your list of dependencies in `mi
 ```elixir
 def deps do
   [
-    {:rmq, "~> 0.1.0-beta.0"}
+    {:rmq, "~> 0.2.0"}
   ]
 end
 ```
@@ -54,12 +54,12 @@ end
 
 #### Options
 
-* `:uri` - AMQP URI (defaults to `"amqp://localhost"`);
-* `:connection_name` - RabbitMQ connection name (defaults to `:undefined`);
-* `:reconnect_interval` - Reconnect interval (defaults to `5000`);
-* options for [`AMQP.Connection.open/3`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/3).
-
-Options passed to `start_link/1` will be merged into options from the config.
+* `:uri` - an AMQP URI. Defaults to `"amqp://localhost"`;
+* `:connection_name` - a RabbitMQ connection name. Defaults to `:undefined`;
+* `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
+  accepts the current connection attempt as a number and returns a new interval.
+  Defaults to `5000`;
+* other options for [`AMQP.Connection.open/3`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/3).
 
 ## RMQ.RPC
 
@@ -69,16 +69,14 @@ RPC via RabbitMQ.
 
 ```elixir
 defmodule MyApp.RemoteResource do
-  use RMQ.RPC,
-    connection: MyApp.RabbitConnection,
-    publishing_options: [app_id: "MyApp"]
+  use RMQ.RPC, publishing_options: [app_id: "MyApp"]
 
   def find_by_id(id) do
-    call("remote-resource-finder", %{id: id}, [message_id: "msg-123"])
+    call("remote-resource-finder", %{id: id}, [message_id: "msg-123"], 10_000)
   end
 
   def list_all() do
-    call("remote-resource-list-all", %{})
+    call("remote-resource-list-all")
   end
 end
 ```
@@ -86,14 +84,17 @@ end
 #### Options
 
 * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
-* `:exchange` - the name of the exchange to which RPC consuming queue is bound.
-  Please make sure the exchange exist. Defaults to `""`.
-* `:timeout` - default timeout for `call/4` Defaults to `5000`.
-* `:consumer_tag` - consumer tag for the callback queue. Defaults to a current module name;
-* `:restart_delay` - restart delay. Defaults to `5000`;
-* `:publishing_options` - options for [`AMQP.Basic.publish/5`](https://hexdocs.pm/amqp/1.4.0/AMQP.Basic.html#publish/5) 
-  except `:reply_to`, `:correlation_id`, `:content_type` - these will be set automatically
-  and cannot be overridden. Defaults to `[]`.
+* `:queue` - the queue name to which the module will be subscribed for consuming responses.
+  Defaults to `""` which means the broker will assign a name to a newly created queue by itself;
+* `:exchange` - the exchange name to which `:queue` will be bound.
+  Please make sure the exchange exist. Defaults to `""` - the default exchange;
+* `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
+* `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
+  _reply_to_, _correlation_id_, _content_type_ - these will be set automatically
+  and cannot be overridden. Defaults to `[]`;
+* `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
+  accepts the current connection attempt as a number and returns a new interval.
+  Defaults to `5000`.
 
 
 ## RMQ.Consumer
@@ -105,16 +106,31 @@ RabbitMQ Consumer.
 ```elixir
 defmodule MyApp.Consumer do
   use RMQ.Consumer,
-    connection: MyApp.RabbitConnection,
-    queue: "my-app-consumer-queue"
+    queue: "my-app-consumer-queue",
+    exchange: {:direct, "my-exchange"}
 
   @impl RMQ.Consumer
-  def process(message, %{content_type: "application/json"}), do: Jason.decode!(message)
-  def process(message, _meta), do: message
-  
+  def consume(chan, payload, meta) do
+    # do something with the payload
+    ack(chan, meta.delivery_tag)
+  end
+end
+
+# or with dynamic configuration
+defmodule MyApp.Consumer2 do
+  use RMQ.Consumer
+
+  @impl RMQ.Consumer
+  def config do
+    [
+      queue: System.fetch_env!("QUEUE_NAME"),
+      reconnect_interval: fn attempt -> attempt * 1000 end,
+    ]
+  end
+
   @impl RMQ.Consumer
   def consume(chan, payload, meta) do
-    # handle message here
+    # do something with the payload
     ack(chan, meta.delivery_tag)
   end
 end
@@ -122,7 +138,8 @@ end
 
 #### Options
 
-* `:connection` - the connection module which implements `RMQ.Connection` behaviour;
+* `:connection` - the connection module which implements `RMQ.Connection` behaviour.
+  Defaults to `RMQ.Connection`;
 * `:queue` - the name of the queue to consume. Will be created if does not exist;
 * `:exchange` - the name of the exchange to which `queue` should be bound.
   Also accepts two-element tuple `{type, name}`. Defaults to `""`;
@@ -134,8 +151,10 @@ end
 * `:dead_letter_exchange` - the name of the exchange to which `dead_letter_queue` should be bound.
   Also accepts two-element tuple `{type, name}`. Defaults to `"#{exchange}.dead-letter"`;
 * `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
-* `:concurrency` - defines if `consume/3` callback will be called in a separate process
-  using `Task.start/1`. Defaults to `true`;
+* `:concurrency` - defines if `consume/3` callback should be called in a separate process.
+  Defaults to `true`;
 * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
 * `:consumer_tag` - consumer tag. Defaults to a current module name;
-* `:restart_delay` - restart delay. Defaults to `5000`.
+* `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
+  accepts the current connection attempt as a number and returns a new interval.
+  Defaults to `5000`;

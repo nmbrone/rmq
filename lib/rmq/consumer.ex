@@ -17,7 +17,7 @@ defmodule RMQ.Consumer do
     * `:dead_letter_exchange` - the name of the exchange to which `dead_letter_queue` should be bound.
       Also accepts two-element tuple `{type, name}`. Defaults to `"#{exchange}.dead-letter"`;
     * `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
-    * `:concurrency` - defines if `c:consume/3` callback will be called in a separate process.
+    * `:concurrency` - defines if `c:consume/3` callback should be called in a separate process.
       Defaults to `true`;
     * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
     * `:consumer_tag` - consumer tag. Defaults to a current module name;
@@ -29,7 +29,7 @@ defmodule RMQ.Consumer do
 
       defmodule MyApp.Consumer do
         use RMQ.Consumer,
-          queue: "my-app-consumer-queue"
+          queue: "my-app-consumer-queue",
           exchange: {:direct, "my-exchange"}
 
         @impl RMQ.Consumer

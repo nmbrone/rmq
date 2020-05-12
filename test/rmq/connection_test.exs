@@ -43,8 +43,8 @@ defmodule RMQ.ConnectionTest do
     start_supervised!(RMQ.Connection)
     start_supervised!(MyConn)
 
-    {:ok, %{pid: pid1}} = RMQ.Connection.get()
-    {:ok, %{pid: pid2}} = MyConn.get()
+    {:ok, %{pid: pid1}} = RMQ.Connection.get_connection()
+    {:ok, %{pid: pid2}} = MyConn.get_connection()
 
     assert pid1 !== pid2
   end
@@ -66,32 +66,32 @@ defmodule RMQ.ConnectionTest do
     start_supervised!(RMQ.Connection)
     start_supervised!(MyConn)
 
-    assert {:error, :not_connected} = RMQ.Connection.get()
-    assert {:error, :not_connected} = MyConn.get()
+    assert {:error, :not_connected} = RMQ.Connection.get_connection()
+    assert {:error, :not_connected} = MyConn.get_connection()
 
     Application.put_env(:rmq, :connection, uri: rabbit_uri())
     Application.put_env(:my_app, MyConn, uri: rabbit_uri())
 
     Process.sleep(100)
 
-    assert {:ok, _} = RMQ.Connection.get()
-    assert {:ok, _} = MyConn.get()
+    assert {:ok, _} = RMQ.Connection.get_connection()
+    assert {:ok, _} = MyConn.get_connection()
   end
 
   test "reconnects in case of losing the connection" do
     start_supervised!(RMQ.Connection)
     start_supervised!(MyConn)
 
-    {:ok, %{pid: pid11} = conn1} = RMQ.Connection.get()
-    {:ok, %{pid: pid12} = conn2} = MyConn.get()
+    {:ok, %{pid: pid11} = conn1} = RMQ.Connection.get_connection()
+    {:ok, %{pid: pid12} = conn2} = MyConn.get_connection()
 
     AMQP.Connection.close(conn1)
     AMQP.Connection.close(conn2)
 
     Process.sleep(10)
 
-    {:ok, %{pid: pid21}} = RMQ.Connection.get()
-    {:ok, %{pid: pid22}} = MyConn.get()
+    {:ok, %{pid: pid21}} = RMQ.Connection.get_connection()
+    {:ok, %{pid: pid22}} = MyConn.get_connection()
 
     assert pid11 != pid21
     assert pid12 != pid22
