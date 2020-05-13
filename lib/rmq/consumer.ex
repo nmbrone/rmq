@@ -163,11 +163,6 @@ defmodule RMQ.Consumer do
     {:noreply, %{state | chan: nil}}
   end
 
-  def handle_info(module, :shutdown = reason, state) do
-    terminate(module, reason, state)
-    {:noreply, state}
-  end
-
   @doc false
   def terminate(_module, _reason, %{chan: chan}) do
     RMQ.Utils.close_channel(chan)
@@ -254,7 +249,7 @@ defmodule RMQ.Consumer do
       def handle_info(msg, state), do: RMQ.Consumer.handle_info(__MODULE__, msg, state)
 
       @impl GenServer
-      def terminate(reason, state), do: RMQ.Consumer.handle_info(__MODULE__, reason, state)
+      def terminate(reason, state), do: RMQ.Consumer.terminate(__MODULE__, reason, state)
 
       defoverridable config: 0, setup_queue: 2
     end
