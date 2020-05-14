@@ -1,6 +1,6 @@
 # RMQ - RabbitMQ tools.
 
-[![Actions Status](https://github.com/nmbrone/rmq/workflows/build/badge.svg?branch=master)](https://github.com/nmbrone/rmq/actions)
+[![Actions Status](https://github.com/nmbrone/rmq/workflows/CI/badge.svg)](https://github.com/nmbrone/rmq/actions)
 [![Hex version badge](https://img.shields.io/hexpm/v/rmq.svg)](https://hex.pm/packages/rmq)
 
 A set of handy tools for working with RabbitMQ in Elixir projects.

@@ -3,21 +3,20 @@ on: push
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: elixir:1.9.4-slim
-      env:
-        MIX_ENV: test
     services:
       rabbitmq:
         image: rabbitmq
-        ports:
-          - 5672:5672
+        ports: ['5672:5672']
         env:
           RABBITMQ_USER: guest
           RABBITMQ_PASS: guest
           RABBITMQ_VHOST: "/"
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
+      - uses: actions/setup-elixir@v1
+        with:
+          otp-version: 22.3
+          elixir-version: 1.10.3
       - uses: actions/cache@v1
         with:
           path: deps
@@ -38,7 +37,7 @@ jobs:
       - name: Run Tests
         run: mix test
         env:
-          RABBITMQ_HOST: rabbitmq
-          RABBITMQ_PORT: ${{ job.services.rabbitmq.ports[5672] }}
+          RABBITMQ_HOST: localhost
+          RABBITMQ_PORT: ${{ job.services.rabbitmq.ports['5672'] }}
           RABBITMQ_USER: guest
           RABBITMQ_PASSWORD: guest
