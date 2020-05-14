@@ -1,6 +1,6 @@
 defmodule RMQ.Connection do
   @moduledoc ~S"""
-  A GenServer which provides a robust connection to the RabbitMQ broker.
+  A `GenServer` which provides a robust connection to the RabbitMQ server.
 
   ## Usage
 

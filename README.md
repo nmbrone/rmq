@@ -4,7 +4,13 @@
 [![Hex version badge](https://img.shields.io/hexpm/v/rmq.svg)](https://hex.pm/packages/rmq)
 
 A set of handy tools for working with RabbitMQ in Elixir projects.
-Based on [`amqp`](https://github.com/pma/amqp) elixir library.
+Based on [`AMQP`](https://github.com/pma/amqp) library.
+
+It includes:
+
+1. [RMQ.Connection](#rmqconnection)
+2. [RMQ.Consumer](#rmqconsumer)
+3. [RMQ.RPQ](#rmqrpc)
 
 ## Installation
 
@@ -20,7 +26,7 @@ end
 
 ## RMQ.Connection
 
-A `GenServer` which opens and holds a connection to RabbitMQ broker.
+A `GenServer` which provides a robust connection to the RabbitMQ server.
 
 #### Usage
 
@@ -60,41 +66,6 @@ end
   accepts the current connection attempt as a number and returns a new interval.
   Defaults to `5000`;
 * other options for [`AMQP.Connection.open/3`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/3).
-
-## RMQ.RPC
-
-RPC via RabbitMQ.
-
-#### Usage
-
-```elixir
-defmodule MyApp.RemoteResource do
-  use RMQ.RPC, publishing_options: [app_id: "MyApp"]
-
-  def find_by_id(id) do
-    call("remote-resource-finder", %{id: id}, [message_id: "msg-123"], 10_000)
-  end
-
-  def list_all() do
-    call("remote-resource-list-all")
-  end
-end
-```
-
-#### Options
-
-* `:connection` - the connection module which implements `RMQ.Connection` behaviour;
-* `:queue` - the queue name to which the module will be subscribed for consuming responses.
-  Defaults to `""` which means the broker will assign a name to a newly created queue by itself;
-* `:exchange` - the exchange name to which `:queue` will be bound.
-  Please make sure the exchange exist. Defaults to `""` - the default exchange;
-* `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
-* `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
-  _reply_to_, _correlation_id_, _content_type_ - these will be set automatically
-  and cannot be overridden. Defaults to `[]`;
-* `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
-  accepts the current connection attempt as a number and returns a new interval.
-  Defaults to `5000`.
 
 
 ## RMQ.Consumer
@@ -158,3 +129,38 @@ end
 * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
   accepts the current connection attempt as a number and returns a new interval.
   Defaults to `5000`;
+
+## RMQ.RPC
+
+RPC via RabbitMQ.
+
+#### Usage
+
+```elixir
+defmodule MyApp.RemoteResource do
+  use RMQ.RPC, publishing_options: [app_id: "MyApp"]
+
+  def find_by_id(id) do
+    call("remote-resource-finder", %{id: id}, [message_id: "msg-123"], 10_000)
+  end
+
+  def list_all() do
+    call("remote-resource-list-all")
+  end
+end
+```
+
+#### Options
+
+* `:connection` - the connection module which implements `RMQ.Connection` behaviour;
+* `:queue` - the queue name to which the module will be subscribed for consuming responses.
+  Defaults to `""` which means the broker will assign a name to a newly created queue by itself;
+* `:exchange` - the exchange name to which `:queue` will be bound.
+  Please make sure the exchange exist. Defaults to `""` - the default exchange;
+* `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
+* `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
+  `reply_to`, `correlation_id`, `content_type` - these will be set automatically
+  and cannot be overridden. Defaults to `[]`;
+* `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
+  accepts the current connection attempt as a number and returns a new interval.
+  Defaults to `5000`.
