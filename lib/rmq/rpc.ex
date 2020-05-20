@@ -11,6 +11,7 @@ defmodule RMQ.RPC do
 
     * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:queue` - the queue name to which the module will be subscribed for consuming responses.
+      Also can be a tuple `{queue, options}`. See the options for `AMQP.Queue.declare/3`.
       Defaults to `""` which means the broker will assign a name to a newly created queue by itself;
     * `:exchange` - the exchange name to which `:queue` will be bound.
       Please make sure the exchange exist. Defaults to `""` - the default exchange;
@@ -59,6 +60,7 @@ defmodule RMQ.RPC do
   """
 
   require Logger
+  import RMQ.Utils
 
   @defaults [
     connection: RMQ.Connection,
@@ -116,8 +118,10 @@ defmodule RMQ.RPC do
   """
   @spec setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: binary()
   def setup_queue(chan, conf) do
+    {q, opts} = normalize_queue(conf[:queue])
+
     {:ok, %{queue: queue}} =
-      AMQP.Queue.declare(chan, conf[:queue], exclusive: true, auto_delete: true)
+      AMQP.Queue.declare(chan, q, Keyword.merge([exclusive: true, auto_delete: true], opts))
 
     unless conf[:exchange] == "" do
       :ok = AMQP.Queue.bind(chan, queue, conf[:exchange], routing_key: queue)

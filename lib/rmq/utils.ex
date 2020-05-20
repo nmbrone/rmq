@@ -8,4 +8,11 @@ defmodule RMQ.Utils do
   def close_channel(%AMQP.Channel{pid: pid} = chan) do
     if Process.alive?(pid), do: AMQP.Channel.close(chan), else: :ok
   end
+
+  def normalize_queue({queue, opts}), do: {queue, opts}
+  def normalize_queue(queue), do: {queue, []}
+
+  def normalize_exchange({type, name, opts}), do: {type, name, opts}
+  def normalize_exchange({type, name}), do: {type, name, []}
+  def normalize_exchange(name), do: {:direct, name, []}
 end

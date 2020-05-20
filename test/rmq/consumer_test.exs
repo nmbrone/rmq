@@ -17,7 +17,7 @@ defmodule RMQ.ConsumerTest do
 
   define_consumer(Consumer3,
     connection: RMQ.TestConnection,
-    queue: "rmq_consumer_3",
+    queue: {"rmq_consumer_3", durable: true},
     exchange: {:topic, "rmq_topic"},
     routing_key: "*.*"
   )
