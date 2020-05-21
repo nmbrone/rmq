@@ -1,5 +1,6 @@
 defmodule RMQ.RPCTest do
   use RMQ.Case
+  import ExUnit.CaptureLog
 
   @moduletag :capture_log
 
@@ -14,7 +15,8 @@ defmodule RMQ.RPCTest do
       [
         connection: RMQ.TestConnection,
         publishing_options: [app_id: "RMQ Test"],
-        reconnect_interval: fn _ -> 200 end
+        reconnect_interval: fn _ -> 200 end,
+        filter_parameters: ~w[password secret]
       ]
     end
   end
@@ -34,14 +36,14 @@ defmodule RMQ.RPCTest do
 
     AMQP.Queue.subscribe(chan, queue, fn payload, meta ->
       params = Jason.decode!(payload)
-      res = Jason.encode!(%{params: params, response: %{ok: true}})
+      res = Jason.encode!(%{params: params, response: %{ok: true, password: "password"}})
       AMQP.Basic.publish(chan, "", meta.reply_to, res, correlation_id: meta.correlation_id)
       send(:current_test, {:consumed, params, meta})
     end)
 
     AMQP.Queue.subscribe(chan, slow_queue, fn payload, meta ->
       params = Jason.decode!(payload)
-      res = Jason.encode!(%{params: params, response: %{ok: true}})
+      res = Jason.encode!(%{params: params, response: %{ok: true, password: "password"}})
       Process.sleep(200)
       AMQP.Basic.publish(chan, "", meta.reply_to, res, correlation_id: meta.correlation_id)
       send(:current_test, {:consumed, params, meta})
@@ -53,7 +55,7 @@ defmodule RMQ.RPCTest do
   end
 
   test "performs the call", ctx do
-    res = {:ok, %{"response" => %{"ok" => true}, "params" => %{}}}
+    res = {:ok, %{"response" => %{"ok" => true, "password" => "password"}, "params" => %{}}}
     assert res == Worker.call(ctx.queue)
     assert res == Worker.call(ctx.queue, %{})
     assert res == Worker.call(ctx.queue, %{}, app_id: "TestApp")
@@ -61,19 +63,17 @@ defmodule RMQ.RPCTest do
   end
 
   test "handles multiple calls from different processes", %{queue: queue, slow_queue: slow_queue} do
-    params = %{user_id: "USR"}
-    response = {:ok, %{"params" => %{"user_id" => "USR"}, "response" => %{"ok" => true}}}
     me = self()
 
     for q <- [slow_queue, queue] do
       spawn(fn ->
-        res = Worker.call(q, params)
+        res = Worker.call(q, %{user_id: "USR"})
         send(me, {q, res})
       end)
     end
 
-    assert_receive {^queue, ^response}, 300
-    assert_receive {^slow_queue, ^response}, 300
+    assert_receive {^queue, {:ok, %{"response" => %{}}}}, 300
+    assert_receive {^slow_queue, {:ok, %{"response" => %{}}}}, 300
   end
 
   test "handles multiple calls from the same process", %{queue: queue, slow_queue: slow_queue} do
@@ -124,5 +124,23 @@ defmodule RMQ.RPCTest do
     # we got timeout here since the consumer for the queue which is defined in :setup block
     # was canceled when the connection was lost
     assert {:error, :timeout} = Worker.call(queue, %{}, [], 100)
+  end
+
+  test "does filter outbound parameters in logs", ctx do
+    log =
+      capture_log(fn ->
+        Worker.call(ctx.queue, %{secret: "secret"})
+      end)
+
+    assert log =~ ~s/"secret" => "[FILTERED]"/
+  end
+
+  test "does filter inbound parameters in logs", ctx do
+    log =
+      capture_log(fn ->
+        Worker.call(ctx.queue)
+      end)
+
+    assert log =~ ~s/"password" => "[FILTERED]"/
   end
 end

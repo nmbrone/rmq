@@ -21,7 +21,10 @@ defmodule RMQ.RPC do
       and cannot be overridden. Defaults to `[]`;
     * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
       accepts the current connection attempt as a number and returns a new interval.
-      Defaults to `5000`.
+      Defaults to `5000`;
+    * `:filter_parameters` - a list of parameters that may contain sensitive data and have
+      to be filtered out when logging. Defaults to `["password"]`.
+
 
   ## Example
 
@@ -67,7 +70,8 @@ defmodule RMQ.RPC do
     queue: "",
     exchange: "",
     publishing_options: [],
-    reconnect_interval: 5000
+    reconnect_interval: 5000,
+    filter_parameters: ["password"]
   ]
 
   @doc """
@@ -156,7 +160,8 @@ defmodule RMQ.RPC do
     Logger.debug("""
     [#{module}] Publishing >>>
       Queue: #{inspect(queue)}
-      Payload: #{inspect(payload)}
+      ID: #{inspect(correlation_id)}
+      Payload: #{inspect(filter_values(payload, config[:filter_parameters]))}
     """)
 
     payload =
@@ -206,7 +211,7 @@ defmodule RMQ.RPC do
     {:noreply, state}
   end
 
-  def handle_info(module, {:basic_deliver, payload, meta}, state) do
+  def handle_info(module, {:basic_deliver, payload, meta}, %{config: config} = state) do
     {pid, state} = pop_in(state.pids[meta.correlation_id])
 
     unless is_nil(pid) do
@@ -218,8 +223,8 @@ defmodule RMQ.RPC do
 
       Logger.debug("""
       [#{module}] Consuming <<<
-        Queue: #{inspect(meta.routing_key)}
-        Payload: #{inspect(payload)}
+        ID: #{inspect(meta.correlation_id)}
+        Payload: #{inspect(filter_values(payload, config[:filter_parameters]))}
       """)
 
       GenServer.reply(pid, {:ok, payload})
