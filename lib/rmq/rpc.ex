@@ -52,11 +52,8 @@ defmodule RMQ.RPC do
             |> MyOtherApp.Resource.get()
             |> Jason.encode!()
 
-          AMQP.Basic.publish(chan, meta.exchange, meta.reply_to, response,
-            correlation_id: meta.correlation_id
-          )
-
-          AMQP.Basic.ack(chan, meta.delivery_tag)
+          reply(chan, meta, response)
+          ack(chan, meta)
         end
       end
 
