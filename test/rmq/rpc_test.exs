@@ -37,7 +37,7 @@ defmodule RMQ.RPCTest do
     AMQP.Queue.subscribe(chan, queue, fn payload, meta ->
       params = Jason.decode!(payload)
       res = Jason.encode!(%{params: params, response: %{ok: true, password: "password"}})
-      AMQP.Basic.publish(chan, "", meta.reply_to, res, correlation_id: meta.correlation_id)
+      RMQ.Utils.reply(chan, meta, res)
       send(:current_test, {:consumed, params, meta})
     end)
 
@@ -45,7 +45,7 @@ defmodule RMQ.RPCTest do
       params = Jason.decode!(payload)
       res = Jason.encode!(%{params: params, response: %{ok: true, password: "password"}})
       Process.sleep(200)
-      AMQP.Basic.publish(chan, "", meta.reply_to, res, correlation_id: meta.correlation_id)
+      RMQ.Utils.reply(chan, meta, res)
       send(:current_test, {:consumed, params, meta})
     end)
 

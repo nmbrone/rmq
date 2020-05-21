@@ -80,10 +80,10 @@ defmodule RMQ.Consumer do
 
   Keep in mind that the consumed message needs to be explicitly acknowledged via `AMQP.Basic.ack/3`
   or rejected via `AMQP.Basic.reject/3`. For convenience, these functions
-  are imported and are available directly.
+  are imported and are available for use directly.
 
-  `AMQP.Basic.publish/5` is imported as well which is convenient for the case
-  when the consumer implements RPC.
+  `RMQ.Utils.reply/4` is imported as well which is convenient for the case when the consumer
+  implements RPC.
 
   When `:concurrency` is `true` this function will be executed in the spawned process
   using `Kernel.spawn/1`.
@@ -234,7 +234,8 @@ defmodule RMQ.Consumer do
     quote location: :keep do
       use GenServer
 
-      import AMQP.Basic, only: [ack: 3, ack: 2, reject: 3, reject: 2, publish: 5, publish: 4]
+      import RMQ.Utils, only: [ack: 3, ack: 2, reply: 4, reply: 3]
+      import AMQP.Basic, only: [reject: 3, reject: 2, publish: 5, publish: 4]
 
       @behaviour RMQ.Consumer
       @config unquote(opts)

@@ -159,7 +159,7 @@ end
   Please make sure the exchange exist. Defaults to `""` - the default exchange;
 * `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
 * `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
-  `reply_to`, `correlation_id`, `content_type` - these will be set automatically
+  `reply_to` and `correlation_id` - these will be set automatically
   and cannot be overridden. Defaults to `[]`;
 * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
   accepts the current connection attempt as a number and returns a new interval.

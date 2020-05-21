@@ -17,8 +17,8 @@ defmodule RMQ.RPC do
       Please make sure the exchange exist. Defaults to `""` - the default exchange;
     * `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
     * `:publishing_options` - any valid options for `AMQP.Basic.publish/5` except
-      `reply_to`, `correlation_id`, `content_type` - these will be set automatically
-      and cannot be overridden. Defaults to `[]`;
+      `reply_to`, `correlation_id` - these will be set automatically and cannot be changed.
+      Defaults to `[]`;
     * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
       accepts the current connection attempt as a number and returns a new interval.
       Defaults to `5000`;
@@ -155,7 +155,6 @@ defmodule RMQ.RPC do
       |> Keyword.merge(options)
       |> Keyword.put(:reply_to, state.queue)
       |> Keyword.put(:correlation_id, correlation_id)
-      |> Keyword.put(:content_type, "application/json")
 
     Logger.debug("""
     [#{module}] Publishing >>>
@@ -164,11 +163,7 @@ defmodule RMQ.RPC do
       Payload: #{inspect(filter_values(payload, config[:filter_parameters]))}
     """)
 
-    payload =
-      case Jason.encode(payload) do
-        {:ok, encoded} -> encoded
-        _ -> payload
-      end
+    payload = encode_message(payload)
 
     case AMQP.Basic.publish(state.chan, config[:exchange], queue, payload, options) do
       :ok -> {:noreply, put_in(state.pids[correlation_id], from)}
@@ -215,11 +210,7 @@ defmodule RMQ.RPC do
     {pid, state} = pop_in(state.pids[meta.correlation_id])
 
     unless is_nil(pid) do
-      payload =
-        case Jason.decode(payload) do
-          {:ok, decoded} -> decoded
-          _ -> payload
-        end
+      payload = decode_message(payload)
 
       Logger.debug("""
       [#{module}] Consuming <<<

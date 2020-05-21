@@ -32,7 +32,7 @@ defmodule RMQ.TestHelpers do
             end
 
           Process.send_after(:current_test, {:consumed, message, meta}, 50)
-          ack(chan, meta.delivery_tag)
+          ack(chan, meta)
         end
 
         if unquote(dynamic) do
