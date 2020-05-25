@@ -19,9 +19,9 @@ defmodule RMQ.Utils do
   def normalize_queue(queue), do: {queue, []}
 
   @doc false
-  def normalize_exchange({type, name, opts}), do: {type, name, opts}
-  def normalize_exchange({type, name}), do: {type, name, []}
-  def normalize_exchange(name), do: {:direct, name, []}
+  def normalize_exchange({name, type, opts}), do: {name, type, opts}
+  def normalize_exchange({type, name}), do: {name, type, []}
+  def normalize_exchange(name), do: {name, :direct, []}
 
   @doc false
   def encode_message(message) when is_binary(message), do: message

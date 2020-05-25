@@ -9,7 +9,7 @@ defmodule RMQ.Consumer do
     * `:queue` - the name of the queue to consume. Will be created if does not exist.
       Also can be a tuple `{queue, options}`. See the options for `AMQP.Queue.declare/3`;
     * `:exchange` - the name of the exchange to which `queue` should be bound.
-      Also can be a tuple `{type, exchange}` or `{type, exchange, options}`. See the options for
+      Also can be a tuple `{exchange, type, options}`. See the options for
       `AMQP.Exchange.declare/4`. Defaults to `""`;
     * `:routing_key` - queue binding key. Defaults to `queue`;
       Will be created if does not exist. Defaults to `""`;
@@ -34,7 +34,7 @@ defmodule RMQ.Consumer do
       defmodule MyApp.Consumer do
         use RMQ.Consumer,
           queue: {"my-app-consumer-queue", durable: true},
-          exchange: {:direct, "my-exchange", durable: true}
+          exchange: {"my-exchange", :direct, durable: true}
 
         @impl RMQ.Consumer
         def consume(chan, payload, meta) do
@@ -178,7 +178,7 @@ defmodule RMQ.Consumer do
   """
   @spec setup_queue(chan :: AMQP.Channel.t(), config :: keyword()) :: :ok
   def setup_queue(chan, config) do
-    {xch_type, xch, xch_opts} = normalize_exchange(config[:exchange])
+    {xch, xch_type, xch_opts} = normalize_exchange(config[:exchange])
     {q, q_opts} = normalize_queue(config[:queue])
 
     dl_args = setup_dead_letter(chan, config)
@@ -199,7 +199,7 @@ defmodule RMQ.Consumer do
 
   defp setup_dead_letter(chan, config) do
     if config[:dead_letter] do
-      {xch_type, xch, xch_opts} = normalize_exchange(config[:dead_letter_exchange])
+      {xch, xch_type, xch_opts} = normalize_exchange(config[:dead_letter_exchange])
       {q, q_opts} = normalize_queue(config[:dead_letter_queue])
 
       {:ok, %{queue: q}} = AMQP.Queue.declare(chan, q, q_opts)
@@ -218,15 +218,20 @@ defmodule RMQ.Consumer do
 
   defp module_config(module) do
     config = Keyword.merge(@defaults, apply(module, :config, []))
-    queue = Keyword.fetch!(config, :queue) |> normalize_queue() |> elem(0)
-    exchange = Keyword.fetch!(config, :exchange) |> normalize_exchange() |> elem(1)
-    dl_exchange = String.replace_prefix("#{exchange}.dead-letter", ".", "")
+    {q, q_opts} = Keyword.fetch!(config, :queue) |> normalize_queue()
+    {xch, xch_type, xch_opts} = Keyword.fetch!(config, :exchange) |> normalize_exchange()
+    dl_xch_name = String.replace_prefix("#{xch}.dead-letter", ".", "")
+    # by default for the dead-letter exchange use the same type and the same `:durable` option
+    # as for the main exchange
+    dl_xch = {dl_xch_name, xch_type, durable: Keyword.get(xch_opts, :durable, false)}
+    # by default for the dead-letter queue use the same `:durable` option as for the main queue
+    dl_q = {"#{q}_error", durable: Keyword.get(q_opts, :durable, false)}
 
     config
-    |> Keyword.put_new(:routing_key, queue)
-    |> Keyword.put_new(:dead_letter_routing_key, queue)
-    |> Keyword.put_new(:dead_letter_exchange, dl_exchange)
-    |> Keyword.put_new(:dead_letter_queue, "#{queue}_error")
+    |> Keyword.put_new(:routing_key, q)
+    |> Keyword.put_new(:dead_letter_routing_key, q)
+    |> Keyword.put_new(:dead_letter_exchange, dl_xch)
+    |> Keyword.put_new(:dead_letter_queue, dl_q)
     |> Keyword.put_new(:consumer_tag, to_string(module))
   end
 

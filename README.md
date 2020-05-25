@@ -78,7 +78,7 @@ RabbitMQ Consumer.
 defmodule MyApp.Consumer do
   use RMQ.Consumer,
     queue: "my-app-consumer-queue",
-    exchange: {:direct, "my-exchange"}
+    exchange: {"my-exchange", :direct, durable: true}
 
   @impl RMQ.Consumer
   def consume(chan, payload, meta) do
@@ -114,7 +114,7 @@ end
 * `:queue` - the name of the queue to consume. Will be created if does not exist.
   Also can be a tuple `{queue, options}`. See the options for `AMQP.Queue.declare/3`;
 * `:exchange` - the name of the exchange to which `queue` should be bound.
-  Also can be a tuple `{type, exchange}` or `{type, exchange, options}`. See the options for
+  Also can be a tuple `{type, exchange, options}`. See the options for
   `AMQP.Exchange.declare/4`. Defaults to `""`;
 * `:routing_key` - queue binding key. Defaults to `queue`;
   Will be created if does not exist. Defaults to `""`;
