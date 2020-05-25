@@ -181,7 +181,7 @@ defmodule RMQ.RPC do
       {:noreply, %{state | chan: chan, queue: queue, config: config, attempt: attempt}}
     else
       error ->
-        time = RMQ.Utils.reconnect_interval(config[:reconnect_interval], attempt)
+        time = reconnect_interval(config[:reconnect_interval], attempt)
         Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
         Process.send_after(self(), :init, time)
         {:noreply, %{state | config: config, attempt: attempt}}
@@ -235,7 +235,7 @@ defmodule RMQ.RPC do
 
   @doc false
   def terminate(_module, _reason, %{chan: chan}) do
-    RMQ.Utils.close_channel(chan)
+    close_channel(chan)
   end
 
   defp module_config(module) do
