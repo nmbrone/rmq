@@ -19,7 +19,7 @@ The package can be installed by adding `rmq` to your list of dependencies in `mi
 ```elixir
 def deps do
   [
-    {:rmq, "~> 0.2.0"}
+    {:rmq, "~> 0.3.0"}
   ]
 end
 ```
