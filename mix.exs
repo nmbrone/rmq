@@ -4,7 +4,7 @@ defmodule RMQ.MixProject do
   def project do
     [
       app: :rmq,
-      version: "0.3.0",
+      version: "0.3.1",
       elixir: "~> 1.8",
       elixirc_paths: elixirc_paths(Mix.env()),
       build_embedded: Mix.env() == :prod,

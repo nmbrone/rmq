@@ -222,8 +222,9 @@ defmodule RMQ.Consumer do
     {xch, xch_type, xch_opts} = Keyword.fetch!(config, :exchange) |> normalize_exchange()
     dl_xch_name = String.replace_prefix("#{xch}.dead-letter", ".", "")
     # by default for the dead-letter exchange use the same type and the same `:durable` option
-    # as for the main exchange
-    dl_xch = {dl_xch_name, xch_type, durable: Keyword.get(xch_opts, :durable, false)}
+    # as for the main exchange. When the `:durable` option isn't set explicitly, we determine it
+    # based on the main exchange. The default exchange `""` is always durable.
+    dl_xch = {dl_xch_name, xch_type, durable: Keyword.get(xch_opts, :durable, xch == "")}
     # by default for the dead-letter queue use the same `:durable` option as for the main queue
     dl_q = {"#{q}_error", durable: Keyword.get(q_opts, :durable, false)}
 
