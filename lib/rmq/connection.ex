@@ -113,8 +113,8 @@ defmodule RMQ.Connection do
   @impl GenServer
   def init(module) do
     Process.flag(:trap_exit, true)
-    send(self(), :connect)
-    {:ok, %{module: module, conn: nil, attempt: 0}}
+    send(self(), {:connect, 1})
+    {:ok, %{module: module, conn: nil}}
   end
 
   @impl GenServer
@@ -123,18 +123,16 @@ defmodule RMQ.Connection do
   end
 
   @impl GenServer
-  def handle_info(:connect, %{module: module, attempt: attempt} = state) do
-    config = apply(module, :config, [])
-    {uri, options} = Keyword.pop(config, :uri, "amqp://localhost")
+  def handle_info({:connect, attempt}, %{module: module} = state) do
+    {uri, options} = Keyword.pop(module.config(), :uri, "amqp://localhost")
     {name, options} = Keyword.pop(options, :name, :undefined)
     {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 5000)
-    attempt = attempt + 1
 
     case AMQP.Connection.open(uri, name, options) do
       {:ok, conn} ->
         Logger.info("[#{module}] Successfully connected to the server")
         Process.monitor(conn.pid)
-        {:noreply, %{state | attempt: attempt, conn: conn}}
+        {:noreply, %{state | conn: conn}}
 
       {:error, reason} ->
         time = RMQ.Utils.reconnect_interval(reconnect_interval, attempt)
@@ -144,14 +142,14 @@ defmodule RMQ.Connection do
             "Reconnecting in #{time}ms"
         )
 
-        Process.send_after(self(), :connect, time)
-        {:noreply, %{state | attempt: attempt}}
+        Process.send_after(self(), {:connect, attempt + 1}, time)
+        {:noreply, state}
     end
   end
 
   def handle_info({:DOWN, _ref, :process, _pid, reason}, %{module: module} = state) do
     Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
-    send(self(), :connect)
+    send(self(), {:connect, 1})
     {:noreply, %{state | conn: nil}}
   end
 

@@ -113,27 +113,26 @@ defmodule RMQ.Consumer do
   @doc false
   def init(_module, _arg) do
     Process.flag(:trap_exit, true)
-    send(self(), :init)
-    {:ok, %{chan: nil, config: %{}, attempt: 0}}
+    send(self(), {:init, 1})
+    {:ok, %{chan: nil, config: %{}}}
   end
 
   @doc false
-  def handle_info(module, :init, %{attempt: attempt} = state) do
+  def handle_info(module, {:init, attempt}, state) do
     config = module_config(module)
-    attempt = attempt + 1
 
     with {:ok, conn} <- config[:connection].get_connection(),
          {:ok, chan} <- AMQP.Channel.open(conn) do
       Process.monitor(chan.pid)
-      apply(module, :setup_queue, [chan, config])
+      module.setup_queue(chan, config)
       Logger.info("[#{module}] Ready")
-      {:noreply, %{state | config: config, attempt: attempt, chan: chan}}
+      {:noreply, %{state | config: config, chan: chan}}
     else
       error ->
         time = reconnect_interval(config[:reconnect_interval], attempt)
         Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
-        Process.send_after(self(), :init, time)
-        {:noreply, %{state | config: config, attempt: attempt}}
+        Process.send_after(self(), {:init, attempt + 1}, time)
+        {:noreply, %{state | config: config}}
     end
   end
 
@@ -154,9 +153,9 @@ defmodule RMQ.Consumer do
 
   def handle_info(module, {:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
     if config[:concurrency] do
-      spawn(fn -> apply(module, :consume, [chan, payload, meta]) end)
+      spawn(fn -> module.consume(chan, payload, meta) end)
     else
-      apply(module, :consume, [chan, payload, meta])
+      module.consume(chan, payload, meta)
     end
 
     {:noreply, state}
@@ -164,7 +163,7 @@ defmodule RMQ.Consumer do
 
   def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
     Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
-    send(self(), :init)
+    send(self(), {:init, 1})
     {:noreply, %{state | chan: nil}}
   end
 
@@ -217,7 +216,7 @@ defmodule RMQ.Consumer do
   end
 
   defp module_config(module) do
-    config = Keyword.merge(@defaults, apply(module, :config, []))
+    config = Keyword.merge(@defaults, module.config())
     {q, q_opts} = Keyword.fetch!(config, :queue) |> normalize_queue()
     {xch, xch_type, xch_opts} = Keyword.fetch!(config, :exchange) |> normalize_exchange()
     dl_xch_name = String.replace_prefix("#{xch}.dead-letter", ".", "")

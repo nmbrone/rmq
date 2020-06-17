@@ -12,7 +12,7 @@ defmodule RMQ.RPC do
     * `:connection` - the connection module which implements `RMQ.Connection` behaviour;
     * `:queue` - the queue name to which the module will be subscribed for consuming responses.
       Also can be a tuple `{queue, options}`. See the options for `AMQP.Queue.declare/3`.
-      Defaults to `""` which means the broker will assign a name to a newly created queue by itself;
+      Defaults to `""` which means the broker will assign a name to the newly created queue by itself;
     * `:exchange` - the exchange name to which `:queue` will be bound.
       Please make sure the exchange exist. Defaults to `""` - the default exchange;
     * `:consumer_tag` - a consumer tag for `:queue`. Defaults to the current module name;
@@ -135,8 +135,8 @@ defmodule RMQ.RPC do
   @doc false
   def init(_module, _arg) do
     Process.flag(:trap_exit, true)
-    send(self(), :init)
-    {:ok, %{chan: nil, queue: nil, pids: %{}, config: %{}, attempt: 0}}
+    send(self(), {:init, 1})
+    {:ok, %{chan: nil, queue: nil, pids: %{}, config: %{}}}
   end
 
   @doc false
@@ -169,22 +169,21 @@ defmodule RMQ.RPC do
   end
 
   @doc false
-  def handle_info(module, :init, %{attempt: attempt} = state) do
+  def handle_info(module, {:init, attempt}, state) do
     config = module_config(module)
-    attempt = attempt + 1
 
     with {:ok, conn} <- config[:connection].get_connection(),
          {:ok, chan} <- AMQP.Channel.open(conn) do
       Process.monitor(chan.pid)
-      queue = apply(module, :setup_queue, [chan, config])
+      queue = module.setup_queue(chan, config)
       Logger.info("[#{module}] Ready")
-      {:noreply, %{state | chan: chan, queue: queue, config: config, attempt: attempt}}
+      {:noreply, %{state | chan: chan, queue: queue, config: config}}
     else
       error ->
         time = reconnect_interval(config[:reconnect_interval], attempt)
         Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
-        Process.send_after(self(), :init, time)
-        {:noreply, %{state | config: config, attempt: attempt}}
+        Process.send_after(self(), {:init, attempt + 1}, time)
+        {:noreply, %{state | config: config}}
     end
   end
 
@@ -224,7 +223,7 @@ defmodule RMQ.RPC do
 
   def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
     Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
-    send(self(), :init)
+    send(self(), {:init, 1})
     {:noreply, %{state | chan: nil}}
   end
 
@@ -240,7 +239,7 @@ defmodule RMQ.RPC do
 
   defp module_config(module) do
     @defaults
-    |> Keyword.merge(apply(module, :config, []))
+    |> Keyword.merge(module.config())
     |> Keyword.put_new(:consumer_tag, to_string(module))
   end
 

@@ -31,12 +31,12 @@ defmodule RMQ.ConnectionTest do
 
   test "can be used directly" do
     {:ok, pid} = start_supervised(RMQ.Connection)
-    assert %{conn: %AMQP.Connection{}, attempt: 1} = :sys.get_state(pid)
+    assert %{conn: %AMQP.Connection{}} = :sys.get_state(pid)
   end
 
   test "can be used via `use` macro" do
     {:ok, pid} = start_supervised(MyConn)
-    assert %{conn: %AMQP.Connection{}, attempt: 1} = :sys.get_state(pid)
+    assert %{conn: %AMQP.Connection{}} = :sys.get_state(pid)
   end
 
   test "can be used simultaneously" do
