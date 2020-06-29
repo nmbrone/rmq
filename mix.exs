@@ -4,7 +4,7 @@ defmodule RMQ.MixProject do
   def project do
     [
       app: :rmq,
-      version: "0.3.1",
+      version: "0.4.0",
       elixir: "~> 1.8",
       elixirc_paths: elixirc_paths(Mix.env()),
       build_embedded: Mix.env() == :prod,
@@ -39,7 +39,7 @@ defmodule RMQ.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:amqp, "~> 1.4"},
+      {:amqp, "~> 1.5"},
       {:ex_doc, "~> 0.21", only: :dev, runtime: false},
       {:jason, "~> 1.2"},
       {:uuid, "~> 1.1"}

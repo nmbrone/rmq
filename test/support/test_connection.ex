@@ -4,7 +4,7 @@ defmodule RMQ.TestConnection do
   def config do
     Keyword.merge(super(),
       uri: RMQ.TestHelpers.rabbit_uri(),
-      connection_name: to_string(__MODULE__),
+      name: to_string(__MODULE__),
       reconnect_interval: 100
     )
   end

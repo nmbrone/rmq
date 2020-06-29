@@ -35,7 +35,7 @@ defmodule MyApp.RabbitConnection do
   use RMQ.Connection,
     otp_app: :my_app,
     uri: "amqp://localhost",
-    connection_name: to_string(__MODULE__)
+    name: to_string(__MODULE__)
 end
 ```
 
@@ -61,11 +61,10 @@ end
 #### Options
 
 * `:uri` - an AMQP URI. Defaults to `"amqp://localhost"`;
-* `:connection_name` - a RabbitMQ connection name. Defaults to `:undefined`;
 * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
   accepts the current connection attempt as a number and returns a new interval.
   Defaults to `5000`;
-* other options for [`AMQP.Connection.open/3`](https://hexdocs.pm/amqp/1.4.0/AMQP.Connection.html#open/3).
+* other options for [`AMQP.Connection.open/2`](https://hexdocs.pm/amqp/1.5.0/AMQP.Connection.html#open/2).
 
 
 ## RMQ.Consumer

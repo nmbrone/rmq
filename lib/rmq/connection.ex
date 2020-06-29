@@ -22,11 +22,10 @@ defmodule RMQ.Connection do
     All configuration is optional.
 
     * `:uri` - an AMQP URI. Defaults to `"amqp://localhost"`;
-    * `:connection_name` - a RabbitMQ connection name. Defaults to `:undefined`;
     * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
       accepts the current connection attempt as a number and returns a new interval.
       Defaults to `5000`;
-    * other options for `AMQP.Connection.open/3`.
+    * other options for `AMQP.Connection.open/2`.
 
   ## Dynamic configuration
 
@@ -125,24 +124,18 @@ defmodule RMQ.Connection do
   @impl GenServer
   def handle_info({:connect, attempt}, %{module: module} = state) do
     {uri, options} = Keyword.pop(module.config(), :uri, "amqp://localhost")
-    {name, options} = Keyword.pop(options, :name, :undefined)
     {reconnect_interval, options} = Keyword.pop(options, :reconnect_interval, 5000)
 
-    case AMQP.Connection.open(uri, name, options) do
+    case AMQP.Connection.open(uri, options) do
       {:ok, conn} ->
-        Logger.info("[#{module}] Successfully connected to the server")
+        Logger.info("[#{module}] Connected")
         Process.monitor(conn.pid)
         {:noreply, %{state | conn: conn}}
 
       {:error, reason} ->
-        time = RMQ.Utils.reconnect_interval(reconnect_interval, attempt)
-
-        Logger.error(
-          "[#{module}] Failed to connect to the server. Reason: #{inspect(reason)}. " <>
-            "Reconnecting in #{time}ms"
-        )
-
-        Process.send_after(self(), {:connect, attempt + 1}, time)
+        ms = RMQ.Utils.reconnect_interval(reconnect_interval, attempt)
+        Logger.error("[#{module}] Connection failed: #{inspect(reason)}. Reconnecting in #{ms}ms")
+        Process.send_after(self(), {:connect, attempt + 1}, ms)
         {:noreply, state}
     end
   end

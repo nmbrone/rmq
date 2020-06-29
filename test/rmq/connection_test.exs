@@ -13,14 +13,14 @@ defmodule RMQ.ConnectionTest do
     unless tags[:skip_config] do
       Application.put_env(:rmq, :connection,
         uri: rabbit_uri(),
-        connection_name: "TestConnection",
+        name: "TestConnection",
         reconnect_interval: 1000,
         virtual_host: "/"
       )
 
       Application.put_env(:my_app, MyConn,
         uri: rabbit_uri(),
-        connection_name: "TestConnection_2",
+        name: "TestConnection_2",
         reconnect_interval: 1000,
         virtual_host: "/"
       )
