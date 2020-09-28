@@ -59,7 +59,7 @@ defmodule RMQ.RPC do
 
   """
 
-  require Logger
+  use RMQ.Logger
   import RMQ.Utils
 
   @defaults [
@@ -153,12 +153,11 @@ defmodule RMQ.RPC do
       |> Keyword.put(:reply_to, state.queue)
       |> Keyword.put(:correlation_id, correlation_id)
 
-    Logger.debug("""
-    [#{module}] Publishing >>>
-      Queue: #{inspect(queue)}
-      ID: #{inspect(correlation_id)}
-      Payload: #{inspect(filter_values(payload, config[:filter_parameters]))}
-    """)
+    log_debug(module, [
+      "Publishing >>> ",
+      "queue=#{inspect(queue)} ",
+      "payload=#{inspect(filter_values(payload, config[:filter_parameters]))}"
+    ])
 
     payload = encode_message(payload)
 
@@ -176,12 +175,12 @@ defmodule RMQ.RPC do
          {:ok, chan} <- AMQP.Channel.open(conn) do
       Process.monitor(chan.pid)
       queue = module.setup_queue(chan, config)
-      Logger.info("[#{module}] Ready")
+      log_info("Ready")
       {:noreply, %{state | chan: chan, queue: queue, config: config}}
     else
       error ->
         time = reconnect_interval(config[:reconnect_interval], attempt)
-        Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
+        log_error("No connection: #{inspect(error)}. Retrying in #{time}ms")
         Process.send_after(self(), {:init, attempt + 1}, time)
         {:noreply, %{state | config: config}}
     end
@@ -208,11 +207,10 @@ defmodule RMQ.RPC do
     unless is_nil(pid) do
       payload = decode_message(payload)
 
-      Logger.debug("""
-      [#{module}] Consuming <<<
-        ID: #{inspect(meta.correlation_id)}
-        Payload: #{inspect(filter_values(payload, config[:filter_parameters]))}
-      """)
+      log_debug(module, [
+        "Consuming <<< ",
+        "payload=#{inspect(filter_values(payload, config[:filter_parameters]))}"
+      ])
 
       GenServer.reply(pid, {:ok, payload})
       AMQP.Basic.ack(state.chan, meta.delivery_tag)
@@ -222,7 +220,7 @@ defmodule RMQ.RPC do
   end
 
   def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
-    Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
+    log_error(module, "Connection lost: #{inspect(reason)}. Reconnecting...")
     send(self(), {:init, 1})
     {:noreply, %{state | chan: nil}}
   end

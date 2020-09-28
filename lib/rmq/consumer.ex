@@ -21,8 +21,6 @@ defmodule RMQ.Consumer do
       Also can be a tuple `{type, exchange}` or `{type, exchange, options}`. See the options for
       `AMQP.Exchange.declare/4`. Defaults to `"#{exchange}.dead-letter"`;
     * `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
-    * `:concurrency` - defines if `c:consume/3` callback should be called in a separate process.
-      Defaults to `true`;
     * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
     * `:consumer_tag` - consumer tag. Defaults to a current module name;
     * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
@@ -63,7 +61,7 @@ defmodule RMQ.Consumer do
 
   """
 
-  require Logger
+  use RMQ.Logger
   import RMQ.Utils
 
   @defaults [
@@ -125,12 +123,12 @@ defmodule RMQ.Consumer do
          {:ok, chan} <- AMQP.Channel.open(conn) do
       Process.monitor(chan.pid)
       module.setup_queue(chan, config)
-      Logger.info("[#{module}] Ready")
+      log_info("Ready")
       {:noreply, %{state | config: config, chan: chan}}
     else
       error ->
         time = reconnect_interval(config[:reconnect_interval], attempt)
-        Logger.error("[#{module}] No connection: #{inspect(error)}. Retrying in #{time}ms")
+        log_error("No connection: #{inspect(error)}. Retrying in #{time}ms")
         Process.send_after(self(), {:init, attempt + 1}, time)
         {:noreply, %{state | config: config}}
     end
@@ -162,7 +160,7 @@ defmodule RMQ.Consumer do
   end
 
   def handle_info(module, {:DOWN, _ref, :process, _pid, reason}, state) do
-    Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
+    log_error(module, "Connection lost: #{inspect(reason)}. Reconnecting...")
     send(self(), {:init, 1})
     {:noreply, %{state | chan: nil}}
   end

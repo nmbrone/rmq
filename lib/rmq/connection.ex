@@ -69,7 +69,7 @@ defmodule RMQ.Connection do
   """
 
   use GenServer
-  require Logger
+  use RMQ.Logger
 
   @doc """
   A callback invoked right before connection.
@@ -128,20 +128,20 @@ defmodule RMQ.Connection do
 
     case AMQP.Connection.open(uri, options) do
       {:ok, conn} ->
-        Logger.info("[#{module}] Connected")
+        log_info("Connected")
         Process.monitor(conn.pid)
         {:noreply, %{state | conn: conn}}
 
       {:error, reason} ->
         ms = RMQ.Utils.reconnect_interval(reconnect_interval, attempt)
-        Logger.error("[#{module}] Connection failed: #{inspect(reason)}. Reconnecting in #{ms}ms")
+        log_error("Connection failed: #{inspect(reason)}. Reconnecting in #{ms}ms")
         Process.send_after(self(), {:connect, attempt + 1}, ms)
         {:noreply, state}
     end
   end
 
   def handle_info({:DOWN, _ref, :process, _pid, reason}, %{module: module} = state) do
-    Logger.error("[#{module}] Connection lost: #{inspect(reason)}. Reconnecting...")
+    log_error(module, "Connection lost: #{inspect(reason)}. Reconnecting...")
     send(self(), {:connect, 1})
     {:noreply, %{state | conn: nil}}
   end
