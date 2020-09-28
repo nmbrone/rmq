@@ -69,8 +69,7 @@ defmodule RMQ.Consumer do
     exchange: "",
     dead_letter: true,
     prefetch_count: 10,
-    reconnect_interval: 5000,
-    concurrency: true
+    reconnect_interval: 5000
   ]
 
   @doc """
@@ -82,9 +81,6 @@ defmodule RMQ.Consumer do
 
   `RMQ.Utils.reply/4` is imported as well which is convenient for the case when the consumer
   implements RPC.
-
-  When `:concurrency` is `true` this function will be executed in the spawned process
-  using `Kernel.spawn/1`.
   """
   @callback consume(chan :: AMQP.Channel.t(), payload :: any(), meta :: map()) :: any()
 
@@ -149,13 +145,8 @@ defmodule RMQ.Consumer do
     {:noreply, state}
   end
 
-  def handle_info(module, {:basic_deliver, payload, meta}, %{chan: chan, config: config} = state) do
-    if config[:concurrency] do
-      spawn(fn -> module.consume(chan, payload, meta) end)
-    else
-      module.consume(chan, payload, meta)
-    end
-
+  def handle_info(module, {:basic_deliver, payload, meta}, %{chan: chan} = state) do
+    module.consume(chan, payload, meta)
     {:noreply, state}
   end
 

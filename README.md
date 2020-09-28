@@ -125,8 +125,6 @@ end
   Also can be a tuple `{type, exchange}` or `{type, exchange, options}`. See the options for
   `AMQP.Exchange.declare/4`. Defaults to `"#{exchange}.dead-letter"`;
 * `:dead_letter_routing_key` - routing key for dead letter messages. Defaults to `queue`;
-* `:concurrency` - defines if `c:consume/3` callback should be called in a separate process.
-  Defaults to `true`;
 * `:prefetch_count` - sets the message prefetch count. Defaults to `10`;
 * `:consumer_tag` - consumer tag. Defaults to a current module name;
 * `:reconnect_interval` - a reconnect interval in milliseconds. It can be also a function that
